@@ -34,6 +34,9 @@ const GlobalStyles = () => (
   <style>{`
     @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@100;300;400;500;700;900&display=swap');
     body { font-family: 'Roboto', sans-serif; margin: 0; padding: 0; overflow: hidden; }
+    /* Optimizaciones para TV */
+    * { -webkit-font-smoothing: antialiased; }
+    .gpu-accelerated { transform: translateZ(0); will-change: transform, opacity; }
     .custom-scrollbar::-webkit-scrollbar { width: 6px; }
     .custom-scrollbar::-webkit-scrollbar-track { background: rgba(255,255,255,0.05); }
     .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); border-radius: 10px; }
@@ -65,7 +68,7 @@ const DEFAULT_SETTINGS = {
 // --- HELPERS ---
 const generateId = (prefix = 'id') => `${prefix}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
-// Función mejorada: Comprime y redimensiona imágenes antes de convertir a Base64
+// Función de compresión ultra-ligera: WebP a 60% de calidad
 const compressImage = (file) => {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -75,19 +78,22 @@ const compressImage = (file) => {
       img.src = event.target.result;
       img.onload = () => {
         const canvas = document.createElement('canvas');
-        const MAX_WIDTH = 800; // Reducimos el ancho máximo para optimizar carga
+        const MAX_WIDTH = 800; 
         const scaleSize = MAX_WIDTH / img.width;
-        // Si la imagen es más pequeña que el máximo, no la agrandamos
         const width = img.width > MAX_WIDTH ? MAX_WIDTH : img.width;
         const height = img.width > MAX_WIDTH ? img.height * scaleSize : img.height;
 
         canvas.width = width;
         canvas.height = height;
         const ctx = canvas.getContext('2d');
+        // Usamos suavizado de imagen para mejor calidad al reducir
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
         ctx.drawImage(img, 0, 0, width, height);
         
-        // Exportamos como JPEG con calidad 0.7 para reducir tamaño drásticamente
-        resolve(canvas.toDataURL('image/jpeg', 0.7)); 
+        // OPTIMIZACIÓN MÁXIMA: WebP con calidad 0.6 (60%)
+        // Esto reduce el tamaño de los assets significativamente para el TV
+        resolve(canvas.toDataURL('image/webp', 0.6)); 
       };
       img.onerror = (error) => reject(error);
     };
@@ -109,13 +115,11 @@ const getVariants = (screen) => {
 
 // --- COMPONENTES VISUALES ---
 
-// Componente Skeleton para carga de imágenes
-// CORRECCIÓN: Se extrae 'children' para no pasarlo al elemento <img>
+// Componente Skeleton (Solo usado en el Dashboard Admin para feedback visual)
 const ImageWithSkeleton = ({ src, alt, className, containerClassName, placeholderIcon = false, children, ...props }) => {
     const [loaded, setLoaded] = useState(false);
     const [error, setError] = useState(false);
 
-    // Si no hay src, mostramos un placeholder (children o el icono por defecto)
     if (!src) {
          return (
             <div className={`bg-white/5 flex items-center justify-center ${className || ''} ${containerClassName || ''}`}>
@@ -127,15 +131,12 @@ const ImageWithSkeleton = ({ src, alt, className, containerClassName, placeholde
     return (
         <div className={`relative overflow-hidden ${containerClassName || ''} ${className}`}>
             {!loaded && !error && (
-                <div className="absolute inset-0 bg-white/10 animate-pulse flex items-center justify-center z-10">
-                    <div className="w-full h-full bg-gradient-to-r from-transparent via-white/5 to-transparent animate-[shimmer_1.5s_infinite]" />
-                </div>
+                <div className="absolute inset-0 bg-white/10 animate-pulse flex items-center justify-center z-10" />
             )}
-            {/* NO se pasan children al img */}
             <img
                 src={src}
                 alt={alt}
-                className={`w-full h-full object-cover transition-opacity duration-500 ${loaded ? 'opacity-100' : 'opacity-0'}`}
+                className={`w-full h-full object-cover transition-opacity duration-300 ${loaded ? 'opacity-100' : 'opacity-0'}`}
                 onLoad={() => setLoaded(true)}
                 onError={() => setError(true)}
                 {...props}
@@ -160,8 +161,6 @@ const NameDisplay = ({ name = "", isSmall = false, maxLines = null }) => {
     const length = name.length;
     let sizeClass = 'text-[1em] leading-tight';
 
-    // Lógica de escalado dinámica y agresiva para evitar cortes ("...")
-    // Si el nombre es muy largo, reducimos el tamaño de fuente y el interlineado
     if (length > 45) sizeClass = 'text-[0.45em] leading-[1.1]';
     else if (length > 35) sizeClass = 'text-[0.55em] leading-[1.1]';
     else if (length > 28) sizeClass = 'text-[0.65em] leading-[1.1]';
@@ -190,20 +189,25 @@ const BackgroundEffect = ({ theme = ["#1e3a8a", "#172554", "#0f172a"] }) => {
 
     return (
         <div className="absolute inset-0 z-0 overflow-hidden pointer-events-none">
-            <motion.div className="absolute inset-0 bg-black" animate={{ backgroundColor: safeTheme[2] }} transition={{ duration: 2 }} />
+            <motion.div 
+                className="absolute inset-0 bg-black" 
+                animate={{ backgroundColor: safeTheme[2] }} 
+                transition={{ duration: 2 }} 
+            />
+            
             <motion.div
-                className="absolute inset-0 opacity-80"
+                className="absolute inset-0 opacity-60 gpu-accelerated"
                 animate={{ backgroundImage: `linear-gradient(125deg, ${safeTheme[2]} 0%, ${safeTheme[1]} 40%, ${safeTheme[0]} 70%, ${safeTheme[2]} 100%)` }}
                 transition={{ duration: 2 }}
                 style={{ backgroundSize: "200% 200%" }}
             >
-                <motion.div className="w-full h-full" animate={{ backgroundPosition: ["0% 0%", "100% 100%", "0% 0%"] }} transition={{ duration: 10, repeat: Infinity, ease: "linear" }} />
+                <motion.div className="w-full h-full" animate={{ backgroundPosition: ["0% 0%", "100% 100%", "0% 0%"] }} transition={{ duration: 15, repeat: Infinity, ease: "linear" }} />
             </motion.div>
             
-            <div className="absolute top-[-10%] right-[-10%] w-[80vw] h-[80vh] opacity-70 mix-blend-screen">
+            <div className="absolute top-[-10%] right-[-10%] w-[80vw] h-[80vh] opacity-40">
                 <svg className="w-full h-full" viewBox="0 0 500 500" preserveAspectRatio="none">
-                    <defs><linearGradient id="gradTop" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stopColor={safeTheme[0]} stopOpacity="0.9" /><stop offset="100%" stopColor={safeTheme[1]} stopOpacity="0" /></linearGradient></defs>
-                    {[0, 1, 2, 3].map(i => {
+                    <defs><linearGradient id="gradTop" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stopColor={safeTheme[0]} stopOpacity="0.8" /><stop offset="100%" stopColor={safeTheme[1]} stopOpacity="0" /></linearGradient></defs>
+                    {[0, 1].map(i => {
                         const d1 = `M${i*50},0 Q${250+i*50},${50+i*50} 500,${200+i*50}`;
                         const d2 = `M${i*50},0 Q${250+i*50},${150+i*50} 500,${200+i*50}`;
                         return (
@@ -211,20 +215,21 @@ const BackgroundEffect = ({ theme = ["#1e3a8a", "#172554", "#0f172a"] }) => {
                                 key={i} 
                                 fill="none" 
                                 stroke="url(#gradTop)" 
-                                strokeWidth={4 - i * 0.5} 
+                                strokeWidth={3} 
                                 initial={{ d: d1 }}
                                 animate={{ d: [d1, d2, d1] }} 
-                                transition={{ duration: 8 + i * 2, repeat: Infinity, ease: "easeInOut", delay: i }} 
+                                transition={{ duration: 10 + i * 2, repeat: Infinity, ease: "easeInOut", delay: i }} 
+                                className="gpu-accelerated"
                             />
                         );
                     })}
                 </svg>
             </div>
 
-            <div className="absolute bottom-[-10%] left-[-10%] w-[80vw] h-[80vh] opacity-70 mix-blend-screen transform rotate-180">
+            <div className="absolute bottom-[-10%] left-[-10%] w-[80vw] h-[80vh] opacity-40 transform rotate-180">
                 <svg className="w-full h-full" viewBox="0 0 500 500" preserveAspectRatio="none">
-                    <defs><linearGradient id="gradBottom" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stopColor={safeTheme[0]} stopOpacity="0.9" /><stop offset="100%" stopColor={safeTheme[1]} stopOpacity="0" /></linearGradient></defs>
-                    {[0, 1, 2, 3].map(i => {
+                    <defs><linearGradient id="gradBottom" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stopColor={safeTheme[0]} stopOpacity="0.8" /><stop offset="100%" stopColor={safeTheme[1]} stopOpacity="0" /></linearGradient></defs>
+                    {[0, 1].map(i => {
                          const d1 = `M${i*50},0 Q${250+i*50},${50+i*50} 500,${200+i*50}`;
                          const d2 = `M${i*50},0 Q${250+i*50},${150+i*50} 500,${200+i*50}`;
                         return (
@@ -232,10 +237,11 @@ const BackgroundEffect = ({ theme = ["#1e3a8a", "#172554", "#0f172a"] }) => {
                                 key={i} 
                                 fill="none" 
                                 stroke="url(#gradBottom)" 
-                                strokeWidth={4 - i * 0.5} 
+                                strokeWidth={3} 
                                 initial={{ d: d1 }}
                                 animate={{ d: [d1, d2, d1] }} 
-                                transition={{ duration: 9 + i * 2, repeat: Infinity, ease: "easeInOut", delay: i }} 
+                                transition={{ duration: 12 + i * 2, repeat: Infinity, ease: "easeInOut", delay: i }}
+                                className="gpu-accelerated" 
                             />
                         );
                     })}
@@ -249,7 +255,7 @@ const BackgroundEffect = ({ theme = ["#1e3a8a", "#172554", "#0f172a"] }) => {
 
 const SeparatorView = ({ screen }) => (
   <div className="w-full h-full flex flex-col items-center justify-center text-center px-10 relative z-20">
-    <motion.div className="relative flex flex-col md:flex-row items-center gap-8 md:gap-16">
+    <motion.div className="relative flex flex-col md:flex-row items-center gap-8 md:gap-16 gpu-accelerated">
         {screen.pin && (
             <motion.div initial={{ x: -100, opacity: 0, rotate: -20 }} animate={{ x: 0, opacity: 1, rotate: 0 }} transition={{ type: "spring", duration: 1.5 }} className="flex-shrink-0">
                 <img src={screen.pin} className="w-32 h-32 md:w-56 md:h-56 object-contain" alt="Rank Pin" />
@@ -257,7 +263,7 @@ const SeparatorView = ({ screen }) => (
         )}
         <div className="text-center md:text-left">
             <span className="text-sm md:text-base uppercase font-medium tracking-[0.8em] text-white/50 mb-2 md:mb-4 block">Reconocimiento</span>
-            <h1 style={{ color: screen.color, textShadow: `0 0 80px ${screen.color}40` }} className="text-5xl md:text-7xl lg:text-[6rem] font-black tracking-tight leading-none uppercase">{screen.rankName}</h1>
+            <h1 style={{ color: screen.color, textShadow: `0 0 40px ${screen.color}40` }} className="text-5xl md:text-7xl lg:text-[6rem] font-black tracking-tight leading-none uppercase">{screen.rankName}</h1>
             <motion.div initial={{ width: 0 }} animate={{ width: "100%" }} transition={{ delay: 0.5, duration: 1 }} className="h-[2px] bg-white/20 mt-8 w-full" />
         </div>
     </motion.div>
@@ -282,9 +288,6 @@ const AffiliateView = ({ screen, clubPin, rankPins }) => {
     }
   }, [screen, isHorizontal, duration]);
 
-  // Aumentamos tamaño +5% extra solicitado
-  // Horizontal: antes 315 -> ahora 330
-  // Vertical: antes 280 -> ahora 295
   const imgWidth = isHorizontal ? 330 : 295; 
   const imgHeight = (imgWidth * 5) / 4;
 
@@ -293,17 +296,16 @@ const AffiliateView = ({ screen, clubPin, rankPins }) => {
         {items.map((person, idx) => (
           <motion.div 
             key={person.id}
-            initial={isVertical ? { y: -1000, opacity: 0 } : {}}
+            initial={isVertical ? { y: -100, opacity: 0 } : {}}
             animate={isVertical ? { y: 0, opacity: 1 } : {}}
             transition={isVertical ? { type: "spring", stiffness: 60, damping: 20, delay: idx * 0.2 } : {}}
-            // Aumentamos dimensiones máximas otro ~5%
             className={`
-                relative flex items-center
-                bg-[#0a0a0a]/60 backdrop-blur-2xl border border-white/[0.08]
-                rounded-[2rem] shadow-[0_20px_60px_-15px_rgba(0,0,0,0.6)]
+                relative flex items-center gpu-accelerated
+                bg-[#0a0a0a]/90 border border-white/[0.08]
+                rounded-[2rem] shadow-xl
                 ${isHorizontal 
-                    ? 'flex-col md:flex-row w-full max-w-[970px] h-auto min-h-[495px] p-8 gap-8' // +5%
-                    : 'flex-col w-full max-w-[390px] h-[600px] p-6' // +5%
+                    ? 'flex-col md:flex-row w-full max-w-[970px] h-auto min-h-[495px] p-8 gap-8' 
+                    : 'flex-col w-full max-w-[390px] h-[600px] p-6' 
                 }
             `}
           >
@@ -312,15 +314,14 @@ const AffiliateView = ({ screen, clubPin, rankPins }) => {
                 style={{ width: imgWidth, height: imgHeight }}
             >
               <div className="absolute inset-0 rounded-[1.5rem] border border-white/10 shadow-inner z-10" />
-              {/* Uso del componente ImageWithSkeleton */}
-              <ImageWithSkeleton
+              <img
                 src={person.foto || "https://via.placeholder.com/400x500?text=Leader"} 
                 alt={person.nombre}
-                className="rounded-[1.5rem] shadow-2xl brightness-110 contrast-110"
-                containerClassName="w-full h-full rounded-[1.5rem]"
+                className="w-full h-full object-cover rounded-[1.5rem] shadow-lg brightness-110 contrast-110 gpu-accelerated"
+                loading="eager"
               />
               {isVertical && person.isPresidentsClub && clubPin && (
-                  <div className="absolute -bottom-5 -right-5 w-20 h-20 z-30 drop-shadow-xl animate-in zoom-in duration-700 delay-500">
+                  <div className="absolute -bottom-5 -right-5 w-20 h-20 z-30 drop-shadow-md animate-in zoom-in duration-700 delay-500">
                       <img src={clubPin} alt="Club" className="w-full h-full object-contain" />
                   </div>
               )}
@@ -357,7 +358,6 @@ const AffiliateView = ({ screen, clubPin, rankPins }) => {
                             )}
 
                             <div className={`${isHorizontal ? 'text-4xl md:text-6xl' : (items.length > 1 ? 'text-2xl md:text-3xl' : 'text-3xl md:text-4xl')} mb-1`}>
-                                {/* Ahora aplicamos maxLines={2} siempre (en horizontal y vertical) */}
                                 <NameDisplay name={person.nombre} isSmall={items.length > 1} maxLines={2} />
                             </div>
                         </div>
@@ -448,7 +448,6 @@ const RankUpdateModal = ({ isOpen, onClose, onUpdate, conflicts }) => {
     );
 };
 
-// --- ADMIN PORTAL CON GESTIÓN DE ASSETS SEPARADOS ---
 const AdminPortal = ({ affiliates, settings, saveAsset, deleteAsset, saveSettings, onClose, isAuthenticated, setIsAuthenticated, user }) => {
     const [passwordInput, setPasswordInput] = useState("");
     const [loginError, setLoginError] = useState(false);
@@ -457,21 +456,16 @@ const AdminPortal = ({ affiliates, settings, saveAsset, deleteAsset, saveSetting
     const [editingId, setEditingId] = useState(null);
     const [searchTerm, setSearchTerm] = useState("");
     
-    // Validaciones y Modales
     const [idError, setIdError] = useState("");
     const [deleteModal, setDeleteModal] = useState({ open: false, id: null });
     const [clearAllModal, setClearAllModal] = useState(false);
     const [rankUpdateModal, setRankUpdateModal] = useState(false);
     
-    // Estados UI
     const [expandedRanks, setExpandedRanks] = useState({});
-
-    // Estados CSV
     const [csvConflicts, setCsvConflicts] = useState([]); 
     
     const fileInputRef = useRef(null);
 
-    // --- HANDLERS ---
     const toggleRank = (rankName) => setExpandedRanks(prev => ({ ...prev, [rankName]: !prev[rankName] }));
 
     const handleSaveAffiliate = async () => {
@@ -479,13 +473,13 @@ const AdminPortal = ({ affiliates, settings, saveAsset, deleteAsset, saveSetting
         if (!formData.nombre || !user) return;
         
         if (!formData.distribuidorId || formData.distribuidorId.trim() === "") {
-            setIdError("El ID de Distribuidor es obligatorio y único.");
+            setIdError("El ID de Distribuidor es obligatorio.");
             return;
         }
 
         const duplicate = affiliates.find(a => a.distribuidorId === formData.distribuidorId && a.id !== (editingId || ''));
         if (duplicate) {
-            setIdError(`Este ID ya está registrado a nombre de: ${duplicate.nombre}`);
+            setIdError(`Este ID ya existe.`);
             return;
         }
 
@@ -505,7 +499,6 @@ const AdminPortal = ({ affiliates, settings, saveAsset, deleteAsset, saveSetting
             if (!user) return;
             const rows = ev.target.result.split('\n').filter(r => r.trim());
             const header = rows[0].toLowerCase();
-            
             const toAdd = [];
             const conflicts = [];
             const processedIds = new Set(); 
@@ -532,12 +525,10 @@ const AdminPortal = ({ affiliates, settings, saveAsset, deleteAsset, saveSetting
 
                 if(!obj.distribuidorId || !obj.nombre) return;
                 if(processedIds.has(obj.distribuidorId)) return;
-                
                 processedIds.add(obj.distribuidorId);
                 if(!obj.rango) obj.rango = "Presidencial";
 
                 const existing = affiliates.find(a => a.distribuidorId === obj.distribuidorId);
-                
                 if (existing) {
                     const oldP = getRankPriority(existing.rango);
                     const newP = getRankPriority(obj.rango);
@@ -593,36 +584,29 @@ const AdminPortal = ({ affiliates, settings, saveAsset, deleteAsset, saveSetting
         await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'affiliates', id), { hidden: !affiliate.hidden }, { merge: true });
     };
 
-    // --- NUEVOS HANDLERS DE ASSETS (Optimized) ---
     const handleImageUpload = async (e, field) => { 
         const file = e.target.files[0]; if(!file) return; 
         try { 
-            // Usamos compressImage en lugar de fileToBase64
             const base64 = await compressImage(file); 
             if (field === 'foto') setFormData(prev => ({ ...prev, foto: base64 })); 
         } catch (err) { console.error(err); } 
     };
     
-    // Guardar PIN: Usa saveAsset (doc separado)
     const handlePinUpload = async (e, rankName) => { 
         const file = e.target.files[0]; if(!file) return; 
         try { 
-            // Usamos compressImage
             const base64 = await compressImage(file); 
             await saveAsset(`rank-${rankName}`, base64); 
         } catch(err) { console.error(err); } 
     };
 
-    // Guardar URL PIN: Usa saveAsset
     const handlePinURL = async (e, rankName) => {
         await saveAsset(`rank-${rankName}`, e.target.value);
     };
 
-    // Guardar CLUB PIN: Usa saveAsset
     const handleClubPinUpload = async (e) => { 
         const file = e.target.files[0]; if(!file) return; 
         try { 
-            // Usamos compressImage
             const base64 = await compressImage(file); 
             await saveAsset('club-pin', base64); 
         } catch(err) { console.error(err); } 
@@ -632,7 +616,6 @@ const AdminPortal = ({ affiliates, settings, saveAsset, deleteAsset, saveSetting
         await saveAsset('club-pin', e.target.value);
     };
 
-    // Guardar Password: Usa saveSettings (doc config)
     const handlePasswordChange = async (e) => {
         await saveSettings({ adminPassword: e.target.value });
     };
@@ -652,16 +635,15 @@ const AdminPortal = ({ affiliates, settings, saveAsset, deleteAsset, saveSetting
                 <input type="password" value={passwordInput} onChange={(e) => {setPasswordInput(e.target.value); setLoginError(false);}} className="w-full bg-black border border-white/10 rounded-xl p-4 text-center mb-4 text-white focus:border-[#D4AF37] outline-none" placeholder="Contraseña de acceso" />
                 {loginError && <p className="text-red-500 text-xs mb-4">Contraseña incorrecta</p>}
                 <button onClick={() => { if (passwordInput === settings.adminPassword) setIsAuthenticated(true); else setLoginError(true); }} className="w-full bg-[#D4AF37] text-black font-bold py-4 rounded-xl text-xs uppercase tracking-widest">Ingresar</button>
-                <button onClick={onClose} className="mt-6 text-xs text-white/30 hover:text-white uppercase tracking-wider">Volver a Presentación</button>
+                <button onClick={onClose} className="mt-6 text-xs text-white/30 hover:text-white uppercase tracking-wider">Volver</button>
              </div>
         </div>
     );
 
     return (
         <div className="absolute inset-0 z-[200] bg-[#000000] text-white flex flex-col">
-            <ConfirmationModal isOpen={deleteModal.open} onClose={() => setDeleteModal({ open: false, id: null })} onConfirm={confirmDelete} title="Eliminar Registro" message="Esta acción es permanente. ¿Deseas continuar?" />
-            <ConfirmationModal isOpen={clearAllModal} onClose={() => setClearAllModal(false)} onConfirm={confirmClearAll} title="Borrar Base de Datos" message="Se eliminarán TODOS los registros cargados." />
-            
+            <ConfirmationModal isOpen={deleteModal.open} onClose={() => setDeleteModal({ open: false, id: null })} onConfirm={confirmDelete} title="Eliminar" message="¿Deseas eliminar este registro?" />
+            <ConfirmationModal isOpen={clearAllModal} onClose={() => setClearAllModal(false)} onConfirm={confirmClearAll} title="Borrar Todo" message="Se eliminarán todos los líderes." />
             <RankUpdateModal isOpen={rankUpdateModal} onClose={() => { setRankUpdateModal(false); setCsvConflicts([]); }} onUpdate={confirmRankUpdates} conflicts={csvConflicts} />
 
             <div className="h-20 border-b border-white/10 flex items-center justify-between px-8 bg-[#0a0a0a]">
@@ -678,39 +660,18 @@ const AdminPortal = ({ affiliates, settings, saveAsset, deleteAsset, saveSetting
                     {activeTab === 'leaders' && (
                         <>
                             <div className="w-80 bg-[#0f0f0f] border border-white/5 rounded-3xl p-6 overflow-y-auto flex flex-col flex-shrink-0">
-                                <div className="flex justify-between items-center mb-6">
-                                    <h3 className={`text-xs font-bold uppercase tracking-widest ${editingId ? 'text-[#3B82F6]' : 'text-[#D4AF37]'}`}>
-                                        {editingId ? 'Editando Registro' : 'Nuevo Registro'}
-                                    </h3>
-                                    {editingId && (
-                                        <button 
-                                            onClick={() => {
-                                                setEditingId(null); 
-                                                setFormData({ distribuidorId: '', nombre: '', rango: 'Presidencial', pais: '', frase: '', foto: '', isPresidentsClub: false, hidden: false });
-                                                setIdError("");
-                                            }} 
-                                            className="text-xs text-white/40 hover:text-white flex items-center gap-1"
-                                        >
-                                            <X size={12} /> Cancelar
-                                        </button>
-                                    )}
-                                </div>
+                                <h3 className={`text-xs font-bold uppercase tracking-widest mb-6 ${editingId ? 'text-[#3B82F6]' : 'text-[#D4AF37]'}`}>
+                                    {editingId ? 'Editando' : 'Nuevo'}
+                                </h3>
                                 <div className="space-y-4 flex-1">
-                                    <div>
-                                        <label className="text-[10px] uppercase text-white/30 font-bold ml-1 mb-1 block">ID Distribuidor *</label>
-                                        <div className="relative">
-                                            <Hash size={14} className="absolute left-3 top-3.5 text-white/20" />
-                                            <input value={formData.distribuidorId} onChange={e => { setFormData({...formData, distribuidorId: e.target.value}); setIdError(""); }} className={`w-full bg-black border ${idError ? 'border-red-500 text-red-100' : 'border-white/10'} p-3 pl-9 rounded-xl text-sm focus:border-white/30 outline-none transition-colors`} placeholder="Obligatorio" />
-                                        </div>
-                                        {idError && <div className="flex items-center gap-1 mt-1 text-red-500 text-[10px]"><AlertTriangle size={10} /> {idError}</div>}
-                                    </div>
+                                    <input value={formData.distribuidorId} onChange={e => { setFormData({...formData, distribuidorId: e.target.value}); setIdError(""); }} className={`w-full bg-black border ${idError ? 'border-red-500' : 'border-white/10'} p-3 rounded-xl text-sm outline-none`} placeholder="ID Distribuidor" />
+                                    {idError && <div className="text-red-500 text-[10px]">{idError}</div>}
                                     <input value={formData.nombre} onChange={e => setFormData({...formData, nombre: e.target.value})} placeholder="Nombre..." className="w-full bg-black border border-white/10 p-3 rounded-xl text-sm outline-none" />
                                     <div className="grid grid-cols-2 gap-2">
                                         <select value={formData.rango} onChange={e => setFormData({...formData, rango: e.target.value})} className="bg-black border border-white/10 p-3 rounded-xl text-sm">{RANKS_CONFIG.map(r => <option key={r.name} value={r.name}>{r.name}</option>)}</select>
                                         <input value={formData.pais} onChange={e => setFormData({...formData, pais: e.target.value})} placeholder="País" className="bg-black border border-white/10 p-3 rounded-xl text-sm outline-none" />
                                     </div>
                                     <input value={formData.foto} onChange={e => setFormData({...formData, foto: e.target.value})} placeholder="URL Foto..." className="w-full bg-black border border-white/10 p-3 rounded-xl text-xs outline-none" />
-                                    {CLUB_ELIGIBLE_RANKS.includes(formData.rango) && (<textarea value={formData.frase} onChange={e => setFormData({...formData, frase: e.target.value})} placeholder="Frase..." className="w-full bg-black border border-white/10 p-3 rounded-xl text-sm h-24 resize-none outline-none" />)}
                                     
                                     {CLUB_ELIGIBLE_RANKS.includes(formData.rango) && (
                                         <div 
@@ -724,52 +685,48 @@ const AdminPortal = ({ affiliates, settings, saveAsset, deleteAsset, saveSetting
                                         </div>
                                     )}
 
-                                    {/* Botón de carga de imagen con optimización */}
                                     <label className="block w-full border border-dashed border-white/20 py-3 rounded-xl text-xs uppercase tracking-widest text-white/40 hover:text-white hover:border-white hover:bg-white/5 transition-all flex items-center justify-center gap-2 cursor-pointer">
-                                        <Upload size={14} /> Cargar Foto (Optimizada)
+                                        <Upload size={14} /> Foto (WebP Optimizada)
                                         <input type="file" className="hidden" accept="image/*" onChange={(e) => handleImageUpload(e, 'foto')} />
                                     </label>
 
-                                    <button onClick={handleSaveAffiliate} className="w-full bg-white text-black font-bold py-4 rounded-xl uppercase text-xs tracking-widest hover:bg-[#D4AF37] transition-all">{editingId ? 'Actualizar' : 'Guardar'}</button>
+                                    <button onClick={handleSaveAffiliate} className="w-full bg-white text-black font-bold py-4 rounded-xl uppercase text-xs tracking-widest hover:bg-[#D4AF37] transition-all">Guardar</button>
                                 </div>
                                 <div className="mt-6 pt-6 border-t border-white/10">
                                     <input type="file" ref={fileInputRef} hidden onChange={handleCSV} accept=".csv" />
-                                    <button onClick={() => fileInputRef.current.click()} className="w-full border border-dashed border-white/20 py-4 rounded-xl text-xs uppercase tracking-widest text-white/40 hover:text-white hover:border-white hover:bg-white/5 transition-all flex items-center justify-center gap-2"><Upload size={14} /> Importar CSV Masivo</button>
+                                    <button onClick={() => fileInputRef.current.click()} className="w-full border border-dashed border-white/20 py-4 rounded-xl text-xs uppercase tracking-widest text-white/40 hover:text-white hover:border-white hover:bg-white/5 transition-all flex items-center justify-center gap-2">Importar CSV</button>
                                 </div>
                             </div>
                             <div className="flex-1 bg-[#0f0f0f] border border-white/5 rounded-3xl p-6 flex flex-col">
                                 <div className="mb-6 flex gap-4 items-center">
                                     <div className="relative flex-1"><Search size={16} className="absolute left-4 top-3.5 text-white/30" /><input value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} placeholder="Buscar..." className="w-full bg-black/50 border border-white/10 rounded-xl py-3 pl-10 pr-4 text-sm text-white outline-none" /></div>
-                                    <button onClick={() => setClearAllModal(true)} className="text-xs text-red-500 hover:underline">Limpiar BD</button>
+                                    <button onClick={() => setClearAllModal(true)} className="text-xs text-red-500">Limpiar BD</button>
                                 </div>
                                 <div className="overflow-y-auto flex-1 pr-2 custom-scrollbar">
                                     {Object.entries(groupedAffiliates).map(([rank, items]) => (
                                         <div key={rank} className="mb-4 bg-white/5 rounded-xl overflow-hidden border border-white/5">
                                             <button onClick={() => toggleRank(rank)} className="w-full flex items-center justify-between p-4 hover:bg-white/5 transition-colors">
                                                 <h4 className="text-xs font-bold uppercase tracking-[0.2em] text-[#D4AF37] flex items-center gap-2">
-                                                    <Award size={14} /> {rank} <span className="bg-white/10 text-white/50 px-2 py-0.5 rounded text-[10px]">{items.length}</span>
+                                                    <Award size={14} /> {rank} ({items.length})
                                                 </h4>
                                                 {expandedRanks[rank] ? <ChevronUp size={16} className="text-white/30" /> : <ChevronDown size={16} className="text-white/30" />}
                                             </button>
                                             
                                             {expandedRanks[rank] && (
-                                                <div className="p-4 bg-black/20 border-t border-white/5">
-                                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                                        {items.map(a => (
-                                                            <div key={a.id} className="flex items-center gap-3 p-3 bg-black/40 rounded-xl border border-transparent hover:border-white/10 transition-all">
-                                                                {/* Uso de ImageWithSkeleton en lista de líderes */}
-                                                                <ImageWithSkeleton 
-                                                                    src={a.foto} 
-                                                                    alt={a.nombre}
-                                                                    className="rounded-lg object-cover"
-                                                                    containerClassName="w-10 h-10 rounded-lg flex-shrink-0"
-                                                                    placeholderIcon={true}
-                                                                />
-                                                                <div className="flex-1 min-w-0"><div className="text-sm font-bold text-white/90 truncate">{a.nombre}</div><div className="text-[9px] text-white/40 truncate">{a.distribuidorId || 'Sin ID'} | {a.pais}</div></div>
-                                                                <div className="flex gap-1"><button onClick={() => toggleHide(a.id)} className="p-2 hover:bg-white/10 rounded-lg">{a.hidden ? <EyeOff size={14} /> : <Eye size={14} />}</button><button onClick={() => {setFormData(a); setEditingId(a.id);}} className="p-2 hover:bg-white/10 rounded-lg"><Edit size={14} /></button><button onClick={() => setDeleteModal({ open: true, id: a.id })} className="p-2 hover:bg-red-500/20 text-red-500 rounded-lg"><Trash2 size={14} /></button></div>
-                                                            </div>
-                                                        ))}
-                                                    </div>
+                                                <div className="p-4 bg-black/20 border-t border-white/5 grid grid-cols-1 md:grid-cols-2 gap-3">
+                                                    {items.map(a => (
+                                                        <div key={a.id} className="flex items-center gap-3 p-3 bg-black/40 rounded-xl border border-white/5">
+                                                            <ImageWithSkeleton 
+                                                                src={a.foto} 
+                                                                alt={a.nombre}
+                                                                className="rounded-lg object-cover"
+                                                                containerClassName="w-10 h-10 rounded-lg flex-shrink-0"
+                                                                placeholderIcon={true}
+                                                            />
+                                                            <div className="flex-1 min-w-0"><div className="text-sm font-bold text-white truncate">{a.nombre}</div><div className="text-[9px] text-white/40">{a.distribuidorId}</div></div>
+                                                            <div className="flex gap-1"><button onClick={() => toggleHide(a.id)} className="p-2 hover:bg-white/10">{a.hidden ? <EyeOff size={14} /> : <Eye size={14} />}</button><button onClick={() => {setFormData(a); setEditingId(a.id);}} className="p-2 hover:bg-white/10"><Edit size={14} /></button><button onClick={() => setDeleteModal({ open: true, id: a.id })} className="p-2 hover:bg-red-500/20 text-red-500"><Trash2 size={14} /></button></div>
+                                                        </div>
+                                                    ))}
                                                 </div>
                                             )}
                                         </div>
@@ -784,10 +741,9 @@ const AdminPortal = ({ affiliates, settings, saveAsset, deleteAsset, saveSetting
                                 <h3 className="text-sm font-bold uppercase tracking-widest text-[#D4AF37] mb-8 border-b border-white/10 pb-4">Pines de Rango</h3>
                                 <div className="grid grid-cols-2 gap-4">
                                     {RANKS_CONFIG.map(rank => (
-                                        <div key={rank.name} className="flex flex-col gap-3 p-4 bg-black/40 rounded-xl border border-white/5 hover:border-white/10 transition-colors">
+                                        <div key={rank.name} className="flex flex-col gap-3 p-4 bg-black/40 rounded-xl border border-white/5">
                                             <div className="flex items-center gap-4">
                                                 <label className="relative cursor-pointer group flex-shrink-0">
-                                                    {/* ImageWithSkeleton para los pines */}
                                                     <ImageWithSkeleton 
                                                         src={settings.rankPins[rank.name]}
                                                         className="object-contain p-2"
@@ -796,15 +752,12 @@ const AdminPortal = ({ affiliates, settings, saveAsset, deleteAsset, saveSetting
                                                     />
                                                     <input type="file" className="hidden" accept="image/*" onChange={(e) => handlePinUpload(e, rank.name)} />
                                                 </label>
-                                                <div className="flex-1 min-w-0">
-                                                    <div className="text-xs font-bold text-white mb-1">{rank.name}</div>
-                                                    <div className="text-[10px] text-white/30 truncate">{settings.rankPins[rank.name] ? 'Imagen cargada' : 'Sin imagen'}</div>
-                                                </div>
+                                                <div className="text-xs font-bold text-white">{rank.name}</div>
                                                 {settings.rankPins[rank.name] && (<button onClick={() => deleteAsset(`rank-${rank.name}`)} className="p-2 text-white/20 hover:text-red-500"><Trash2 size={14} /></button>)}
                                             </div>
                                             <div className="relative">
                                                 <Link size={12} className="absolute left-3 top-3 text-white/20" />
-                                                <input value={settings.rankPins[rank.name]?.startsWith('http') ? settings.rankPins[rank.name] : ''} onChange={(e) => handlePinURL(e, rank.name)} placeholder="O pegar URL de imagen..." className="w-full bg-white/5 border border-white/5 rounded-lg py-2 pl-8 pr-3 text-[10px] text-white/70 focus:border-white/20 outline-none" />
+                                                <input value={settings.rankPins[rank.name]?.startsWith('http') ? settings.rankPins[rank.name] : ''} onChange={(e) => handlePinURL(e, rank.name)} placeholder="URL de imagen..." className="w-full bg-white/5 border border-white/5 rounded-lg py-2 pl-8 pr-3 text-[10px] text-white/70 outline-none" />
                                             </div>
                                         </div>
                                     ))}
@@ -814,16 +767,15 @@ const AdminPortal = ({ affiliates, settings, saveAsset, deleteAsset, saveSetting
                                 <div className="bg-[#0f0f0f] border border-white/5 rounded-3xl p-8 text-center">
                                     <h3 className="text-sm font-bold uppercase tracking-widest text-[#D4AF37] mb-6">President's Club</h3>
                                     <label className="block w-40 h-40 mx-auto bg-black rounded-full border border-dashed border-white/20 hover:border-[#D4AF37] cursor-pointer flex items-center justify-center relative overflow-hidden group transition-all mb-4">
-                                        {/* ImageWithSkeleton para el Club Pin */}
                                         <ImageWithSkeleton 
                                             src={settings.presidentsClubPin}
                                             className="object-contain p-6"
                                             containerClassName="w-full h-full"
                                         >
                                             {!settings.presidentsClubPin && (
-                                                <div className="flex flex-col items-center gap-2 text-white/30 group-hover:text-[#D4AF37]">
+                                                <div className="flex flex-col items-center gap-2 text-white/30">
                                                     <Upload size={24} />
-                                                    <span className="text-[10px] uppercase tracking-wider">Cargar Pin</span>
+                                                    <span className="text-[10px] uppercase">Subir Pin</span>
                                                 </div>
                                             )}
                                         </ImageWithSkeleton>
@@ -831,26 +783,18 @@ const AdminPortal = ({ affiliates, settings, saveAsset, deleteAsset, saveSetting
                                     </label>
                                     <div className="relative mb-4">
                                         <Link size={12} className="absolute left-3 top-3 text-white/20" />
-                                        <input value={settings.presidentsClubPin?.startsWith('http') ? settings.presidentsClubPin : ''} onChange={handleClubPinURL} placeholder="O pegar URL de imagen..." className="w-full bg-white/5 border border-white/5 rounded-lg py-2 pl-8 pr-3 text-[10px] text-white/70 focus:border-white/20 outline-none" />
+                                        <input value={settings.presidentsClubPin?.startsWith('http') ? settings.presidentsClubPin : ''} onChange={handleClubPinURL} placeholder="URL de imagen..." className="w-full bg-white/5 border border-white/5 rounded-lg py-2 pl-8 pr-3 text-[10px] text-white/70 outline-none" />
                                     </div>
-                                    {settings.presidentsClubPin && (<button onClick={() => deleteAsset('club-pin')} className="text-xs text-red-500 hover:underline">Eliminar Pin</button>)}
+                                    {settings.presidentsClubPin && (<button onClick={() => deleteAsset('club-pin')} className="text-xs text-red-500 underline">Borrar Pin</button>)}
                                 </div>
                             </div>
                         </div>
                     )}
                     {activeTab === 'security' && (
                         <div className="w-full max-w-lg mx-auto bg-[#0f0f0f] border border-white/5 rounded-3xl p-12 self-center">
-                            <h3 className="text-xl font-bold text-white mb-8 text-center">Credenciales de Acceso</h3>
-                            <div className="space-y-6">
-                                <div>
-                                    <label className="text-[10px] uppercase text-white/40 font-bold ml-1 mb-2 block">Nueva Contraseña</label>
-                                    <input type="password" value={settings.adminPassword} onChange={handlePasswordChange} className="w-full bg-black border border-white/10 rounded-xl p-4 text-white focus:border-[#D4AF37] outline-none text-center tracking-[0.5em] text-lg transition-colors" />
-                                </div>
-                                <div className="bg-[#D4AF37]/5 p-4 rounded-xl flex items-start gap-3 border border-[#D4AF37]/10">
-                                    <CheckCircle size={20} className="text-[#D4AF37] mt-0.5 flex-shrink-0" />
-                                    <p className="text-xs text-[#D4AF37]/80 leading-relaxed">Esta contraseña protege el acceso a toda la configuración y base de datos.</p>
-                                </div>
-                            </div>
+                            <h3 className="text-xl font-bold text-white mb-8 text-center">Seguridad</h3>
+                            <label className="text-[10px] uppercase text-white/40 font-bold ml-1 mb-2 block">Nueva Contraseña</label>
+                            <input type="password" value={settings.adminPassword} onChange={handlePasswordChange} className="w-full bg-black border border-white/10 rounded-xl p-4 text-white focus:border-[#D4AF37] outline-none text-center text-lg" />
                         </div>
                     )}
                 </div>
@@ -859,19 +803,15 @@ const AdminPortal = ({ affiliates, settings, saveAsset, deleteAsset, saveSetting
     );
 };
 
-// --- COMPONENTE PRINCIPAL (DEFINIDO AL FINAL) ---
 const App = () => {
   const [affiliates, setAffiliates] = useState([]);
-  // settingsConfig contiene SOLO la contraseña u otros ajustes pequeños
   const [settingsConfig, setSettingsConfig] = useState(DEFAULT_SETTINGS);
-  // assets contiene las imágenes base64
   const [assets, setAssets] = useState({});
-  
   const [user, setUser] = useState(null);
   const [view, setView] = useState('tv');
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isAdminAuthenticated, setIsAdminAuthenticated] = useState(false);
-  const [stylesLoaded, setStylesLoaded] = useState(false); // Estado para controlar la carga de estilos
+  const [stylesLoaded, setStylesLoaded] = useState(false); 
 
   useEffect(() => {
     const initAuth = async () => {
@@ -885,24 +825,11 @@ const App = () => {
     return onAuthStateChanged(auth, setUser);
   }, []);
 
-  // Inject Tailwind via CDN if not available (Fallback for local testing without build setup)
   useEffect(() => {
-    // Si ya existe tailwind en window, marcamos como cargado
-    if (window.tailwind) {
-      setStylesLoaded(true);
-      return;
-    }
-
-    // Buscamos si ya hay un script insertado
+    if (window.tailwind) { setStylesLoaded(true); return; }
     const existingScript = document.querySelector('script[src*="tailwindcss"]');
-    
-    if (existingScript) {
-      // Si existe pero no ha cargado, esperamos
-      existingScript.addEventListener('load', () => setStylesLoaded(true));
-      // Fallback por si ya cargó antes del listener
-      setTimeout(() => setStylesLoaded(true), 500);
-    } else {
-      // Si no existe, lo creamos
+    if (existingScript) { existingScript.addEventListener('load', () => setStylesLoaded(true)); setTimeout(() => setStylesLoaded(true), 500); } 
+    else {
       const script = document.createElement('script');
       script.src = "https://cdn.tailwindcss.com";
       script.async = true;
@@ -913,77 +840,23 @@ const App = () => {
 
   useEffect(() => {
     if (!user) return;
-    
-    // Listener: Afiliados
-    const unsubscribeAffiliates = onSnapshot(
-        collection(db, 'artifacts', appId, 'public', 'data', 'affiliates'),
-        (snapshot) => { setAffiliates(snapshot.docs.map(d => ({ id: d.id, ...d.data() }))); },
-        (err) => console.error("Error cargando afiliados:", err)
-    );
-    
-    // Listener: Configuración (Password) - Ligero
-    const unsubscribeConfig = onSnapshot(
-        doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'config'),
-        (docSnap) => {
-            if (docSnap.exists()) setSettingsConfig({ ...DEFAULT_SETTINGS, ...docSnap.data() });
-            else setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'config'), DEFAULT_SETTINGS);
-        },
-        (err) => console.error("Error cargando configuración:", err)
-    );
-
-    // Listener: Assets (Imágenes) - Pesado pero dividido en documentos
-    const unsubscribeAssets = onSnapshot(
-        collection(db, 'artifacts', appId, 'public', 'data', 'assets'),
-        (snapshot) => {
-            const newAssets = {};
-            snapshot.forEach(doc => {
-                newAssets[doc.id] = doc.data().image;
-            });
-            setAssets(newAssets);
-        },
-        (err) => console.error("Error cargando assets:", err)
-    );
-
+    const unsubscribeAffiliates = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'affiliates'), (snapshot) => setAffiliates(snapshot.docs.map(d => ({ id: d.id, ...d.data() }))));
+    const unsubscribeConfig = onSnapshot(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'config'), (docSnap) => { if (docSnap.exists()) setSettingsConfig({ ...DEFAULT_SETTINGS, ...docSnap.data() }); else setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'config'), DEFAULT_SETTINGS); });
+    const unsubscribeAssets = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'assets'), (snapshot) => {
+        const newAssets = {}; snapshot.forEach(doc => { newAssets[doc.id] = doc.data().image; }); setAssets(newAssets);
+    });
     return () => { unsubscribeAffiliates(); unsubscribeConfig(); unsubscribeAssets(); };
   }, [user]);
 
-  // COMBINAR SETTINGS Y ASSETS PARA LA UI
   const finalSettings = useMemo(() => {
       const rankPins = {};
-      Object.keys(assets).forEach(key => {
-          if (key.startsWith('rank-')) {
-              const rankName = key.replace('rank-', '');
-              rankPins[rankName] = assets[key];
-          }
-      });
-      return {
-          ...settingsConfig, // Contiene adminPassword
-          presidentsClubPin: assets['club-pin'] || "",
-          rankPins
-      };
+      Object.keys(assets).forEach(key => { if (key.startsWith('rank-')) rankPins[key.replace('rank-', '')] = assets[key]; });
+      return { ...settingsConfig, presidentsClubPin: assets['club-pin'] || "", rankPins };
   }, [settingsConfig, assets]);
 
-  // FUNCIONES DE GUARDADO OPTIMIZADAS
-  // 1. Guardar Configuración (Solo texto/password)
-  const saveSettings = async (newConfig) => {
-      if (!user) return;
-      try { await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'config'), newConfig, { merge: true }); }
-      catch (err) { console.error("Error guardando settings:", err); }
-  };
-
-  // 2. Guardar Asset (Imagen individual en su propio documento)
-  const saveAsset = async (assetId, imageString) => {
-      if (!user) return;
-      try { await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'assets', assetId), { image: imageString }); }
-      catch (err) { console.error(`Error guardando asset ${assetId}:`, err); }
-  };
-
-  // 3. Eliminar Asset
-  const deleteAsset = async (assetId) => {
-      if (!user) return;
-      try { await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'assets', assetId)); }
-      catch (err) { console.error(`Error eliminando asset ${assetId}:`, err); }
-  };
+  const saveSettings = async (newConfig) => { if (user) await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'config'), newConfig, { merge: true }); };
+  const saveAsset = async (assetId, imageString) => { if (user) await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'assets', assetId), { image: imageString }); };
+  const deleteAsset = async (assetId) => { if (user) await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'assets', assetId)); };
 
   const timeline = useMemo(() => {
     let sequence = [];
@@ -992,8 +865,7 @@ const App = () => {
       const filtered = activeAffiliates.filter(a => a && a.rango === rank.name);
       if (filtered.length === 0) return;
       sequence.push({ type: 'separator', rankName: rank.name, color: rank.color, duration: 4000, id: `sep-${rank.name}`, pin: finalSettings.rankPins[rank.name], theme: rank.theme });
-      const isExtendedDuration = EXTENDED_TIME_RANKS.includes(rank.name);
-      const slideDuration = isExtendedDuration ? 12000 : 8000;
+      const slideDuration = EXTENDED_TIME_RANKS.includes(rank.name) ? 12000 : 8000;
       if (rank.single) filtered.forEach(aff => sequence.push({ type: 'affiliate', items: [aff], rankConfig: rank, duration: slideDuration, id: `aff-${aff.id}` }));
       else {
         for (let i = 0; i < filtered.length; i += 2) {
@@ -1014,42 +886,17 @@ const App = () => {
 
   const currentScreen = timeline[currentIndex] || { type: 'empty', theme: ["#000000", "#111111", "#000000"] };
 
-  // Pantalla de carga para evitar FOUC
-  if (!stylesLoaded) {
-    return (
-      <div style={{ 
-        position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', 
-        backgroundColor: '#020617', 
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        color: '#D4AF37', fontFamily: 'sans-serif', fontSize: '1.5rem', fontWeight: 'bold',
-        zIndex: 9999
-      }}>
-        Cargando recursos...
-      </div>
-    );
-  }
+  if (!stylesLoaded) return <div className="fixed inset-0 bg-[#020617] flex items-center justify-center text-[#D4AF37]">Optimizando rendimiento...</div>;
 
-  if (view === 'admin') {
-      return (
-          <>
-            <GlobalStyles />
-            <AdminPortal 
-                affiliates={affiliates} 
-                settings={finalSettings} 
-                saveAsset={saveAsset}
-                deleteAsset={deleteAsset}
-                saveSettings={saveSettings}
-                onClose={() => setView('tv')} 
-                isAuthenticated={isAdminAuthenticated} 
-                setIsAuthenticated={setIsAdminAuthenticated} 
-                user={user} 
-            />
-          </>
-      );
-  }
+  if (view === 'admin') return (
+    <>
+      <GlobalStyles />
+      <AdminPortal affiliates={affiliates} settings={finalSettings} saveAsset={saveAsset} deleteAsset={deleteAsset} saveSettings={saveSettings} onClose={() => setView('tv')} isAuthenticated={isAdminAuthenticated} setIsAuthenticated={setIsAdminAuthenticated} user={user} />
+    </>
+  );
 
   return (
-    <div className="fixed inset-0 bg-[#020617] text-white overflow-hidden font-sans flex items-center justify-center select-none">
+    <div className="fixed inset-0 bg-[#020617] text-white overflow-hidden flex items-center justify-center select-none">
       <GlobalStyles />
       <BackgroundEffect theme={currentScreen.theme || currentScreen.rankConfig?.theme} />
       <AnimatePresence mode="wait" initial={false}>
@@ -1064,7 +911,7 @@ const App = () => {
             ) : <AffiliateView screen={currentScreen} clubPin={finalSettings.presidentsClubPin} rankPins={finalSettings.rankPins} />}
         </motion.div>
       </AnimatePresence>
-      <button onClick={() => setView('admin')} className="absolute bottom-5 right-5 z-[150] p-3 opacity-20 hover:opacity-100 transition-opacity duration-500 text-white"><Lock size={16} /></button>
+      <button onClick={() => setView('admin')} className="absolute bottom-5 right-5 z-[150] p-3 opacity-10 hover:opacity-100 transition-opacity duration-500"><Lock size={16} /></button>
     </div>
   );
 };
