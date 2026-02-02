@@ -110,15 +110,16 @@ const getVariants = (screen) => {
 // --- COMPONENTES VISUALES ---
 
 // Componente Skeleton para carga de imágenes
-const ImageWithSkeleton = ({ src, alt, className, containerClassName, placeholderIcon = false, ...props }) => {
+// CORRECCIÓN: Se extrae 'children' para no pasarlo al elemento <img>
+const ImageWithSkeleton = ({ src, alt, className, containerClassName, placeholderIcon = false, children, ...props }) => {
     const [loaded, setLoaded] = useState(false);
     const [error, setError] = useState(false);
 
-    // Si no hay src, mostramos un placeholder inmediatamente
+    // Si no hay src, mostramos un placeholder (children o el icono por defecto)
     if (!src) {
          return (
-            <div className={`bg-white/5 flex items-center justify-center ${className} ${containerClassName}`}>
-                {placeholderIcon && <ImageIcon className="text-white/20" size={24} />}
+            <div className={`bg-white/5 flex items-center justify-center ${className || ''} ${containerClassName || ''}`}>
+                {children ? children : (placeholderIcon && <ImageIcon className="text-white/20" size={24} />)}
             </div>
          );
     }
@@ -130,6 +131,7 @@ const ImageWithSkeleton = ({ src, alt, className, containerClassName, placeholde
                     <div className="w-full h-full bg-gradient-to-r from-transparent via-white/5 to-transparent animate-[shimmer_1.5s_infinite]" />
                 </div>
             )}
+            {/* NO se pasan children al img */}
             <img
                 src={src}
                 alt={alt}
