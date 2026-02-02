@@ -11,7 +11,6 @@ import { getFirestore, collection, doc, setDoc, deleteDoc, onSnapshot, writeBatc
 // --- FIREBASE SETUP ---
 
 
-
 // 2. CONFIGURACIÓN PARA VERCEL / VITE (PRODUCCIÓN):
 
 const firebaseConfig = {
@@ -23,7 +22,6 @@ const firebaseConfig = {
   appId: import.meta.env.VITE_APP_ID,
   measurementId: import.meta.env.VITE_MEASUREMENT_ID
 };
-
 
 // Inicialización segura
 const app = initializeApp(Object.keys(firebaseConfig).length > 0 ? firebaseConfig : { apiKey: "demo" }); 
@@ -222,10 +220,10 @@ const AffiliateView = ({ screen, clubPin, rankPins }) => {
     }
   }, [screen, isHorizontal, duration]);
 
-  // Aumentamos el tamaño de la imagen base:
-  // Horizontal: antes 300 -> ahora 315 (+5% extra solicitado)
-  // Vertical: se mantiene en 280
-  const imgWidth = isHorizontal ? 315 : 280; 
+  // Aumentamos tamaño +5% extra solicitado
+  // Horizontal: antes 315 -> ahora 330
+  // Vertical: antes 280 -> ahora 295
+  const imgWidth = isHorizontal ? 330 : 295; 
   const imgHeight = (imgWidth * 5) / 4;
 
   return (
@@ -236,13 +234,14 @@ const AffiliateView = ({ screen, clubPin, rankPins }) => {
             initial={isVertical ? { y: -1000, opacity: 0 } : {}}
             animate={isVertical ? { y: 0, opacity: 1 } : {}}
             transition={isVertical ? { type: "spring", stiffness: 60, damping: 20, delay: idx * 0.2 } : {}}
+            // Aumentamos dimensiones máximas otro ~5%
             className={`
                 relative flex items-center
                 bg-[#0a0a0a]/60 backdrop-blur-2xl border border-white/[0.08]
                 rounded-[2rem] shadow-[0_20px_60px_-15px_rgba(0,0,0,0.6)]
                 ${isHorizontal 
-                    ? 'flex-col md:flex-row w-full max-w-[920px] h-auto min-h-[470px] p-8 gap-8'
-                    : 'flex-col w-full max-w-[370px] h-[570px] p-6'
+                    ? 'flex-col md:flex-row w-full max-w-[970px] h-auto min-h-[495px] p-8 gap-8' // +5%
+                    : 'flex-col w-full max-w-[390px] h-[600px] p-6' // +5%
                 }
             `}
           >
@@ -294,7 +293,8 @@ const AffiliateView = ({ screen, clubPin, rankPins }) => {
                             )}
 
                             <div className={`${isHorizontal ? 'text-4xl md:text-6xl' : (items.length > 1 ? 'text-2xl md:text-3xl' : 'text-3xl md:text-4xl')} mb-1`}>
-                                <NameDisplay name={person.nombre} isSmall={items.length > 1} maxLines={isVertical ? 2 : null} />
+                                {/* Ahora aplicamos maxLines={2} siempre (en horizontal y vertical) */}
+                                <NameDisplay name={person.nombre} isSmall={items.length > 1} maxLines={2} />
                             </div>
                         </div>
                         
