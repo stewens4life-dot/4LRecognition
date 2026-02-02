@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 // Se usa 'Link' de lucide-react (antes Link2) y se limpian imports
-import { Upload, Trash2, Globe, Award, Lock, CheckCircle, Edit, Monitor, Eye, EyeOff, Search, Hash, AlertTriangle, ArrowUpCircle, ChevronDown, ChevronUp, Link, X } from 'lucide-react';
+import { Upload, Trash2, Globe, Award, Lock, CheckCircle, Edit, Monitor, Eye, EyeOff, Search, Hash, AlertTriangle, ArrowUpCircle, ChevronDown, ChevronUp, Link, X, Image as ImageIcon } from 'lucide-react';
 
 // --- FIREBASE IMPORTS ---
 import { initializeApp } from "firebase/app";
@@ -9,7 +9,6 @@ import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged }
 import { getFirestore, collection, doc, setDoc, deleteDoc, onSnapshot, writeBatch } from "firebase/firestore";
 
 // --- FIREBASE SETUP ---
-
 
 // 2. CONFIGURACIÓN PARA VERCEL / VITE (PRODUCCIÓN):
 
@@ -22,6 +21,7 @@ const firebaseConfig = {
   appId: import.meta.env.VITE_APP_ID,
   measurementId: import.meta.env.VITE_MEASUREMENT_ID
 };
+
 
 // Inicialización segura
 const app = initializeApp(Object.keys(firebaseConfig).length > 0 ? firebaseConfig : { apiKey: "demo" }); 
@@ -65,11 +65,32 @@ const DEFAULT_SETTINGS = {
 // --- HELPERS ---
 const generateId = (prefix = 'id') => `${prefix}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
-const fileToBase64 = (file) => {
+// Función mejorada: Comprime y redimensiona imágenes antes de convertir a Base64
+const compressImage = (file) => {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.readAsDataURL(file);
-    reader.onload = () => resolve(reader.result);
+    reader.onload = (event) => {
+      const img = new Image();
+      img.src = event.target.result;
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const MAX_WIDTH = 800; // Reducimos el ancho máximo para optimizar carga
+        const scaleSize = MAX_WIDTH / img.width;
+        // Si la imagen es más pequeña que el máximo, no la agrandamos
+        const width = img.width > MAX_WIDTH ? MAX_WIDTH : img.width;
+        const height = img.width > MAX_WIDTH ? img.height * scaleSize : img.height;
+
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, width, height);
+        
+        // Exportamos como JPEG con calidad 0.7 para reducir tamaño drásticamente
+        resolve(canvas.toDataURL('image/jpeg', 0.7)); 
+      };
+      img.onerror = (error) => reject(error);
+    };
     reader.onerror = (error) => reject(error);
   });
 };
@@ -87,6 +108,39 @@ const getVariants = (screen) => {
 };
 
 // --- COMPONENTES VISUALES ---
+
+// Componente Skeleton para carga de imágenes
+const ImageWithSkeleton = ({ src, alt, className, containerClassName, placeholderIcon = false, ...props }) => {
+    const [loaded, setLoaded] = useState(false);
+    const [error, setError] = useState(false);
+
+    // Si no hay src, mostramos un placeholder inmediatamente
+    if (!src) {
+         return (
+            <div className={`bg-white/5 flex items-center justify-center ${className} ${containerClassName}`}>
+                {placeholderIcon && <ImageIcon className="text-white/20" size={24} />}
+            </div>
+         );
+    }
+
+    return (
+        <div className={`relative overflow-hidden ${containerClassName || ''} ${className}`}>
+            {!loaded && !error && (
+                <div className="absolute inset-0 bg-white/10 animate-pulse flex items-center justify-center z-10">
+                    <div className="w-full h-full bg-gradient-to-r from-transparent via-white/5 to-transparent animate-[shimmer_1.5s_infinite]" />
+                </div>
+            )}
+            <img
+                src={src}
+                alt={alt}
+                className={`w-full h-full object-cover transition-opacity duration-500 ${loaded ? 'opacity-100' : 'opacity-0'}`}
+                onLoad={() => setLoaded(true)}
+                onError={() => setError(true)}
+                {...props}
+            />
+        </div>
+    );
+};
 
 const NameDisplay = ({ name = "", isSmall = false, maxLines = null }) => {
     const parts = name.trim().split(/\s+/);
@@ -250,10 +304,12 @@ const AffiliateView = ({ screen, clubPin, rankPins }) => {
                 style={{ width: imgWidth, height: imgHeight }}
             >
               <div className="absolute inset-0 rounded-[1.5rem] border border-white/10 shadow-inner z-10" />
-              <img 
+              {/* Uso del componente ImageWithSkeleton */}
+              <ImageWithSkeleton
                 src={person.foto || "https://via.placeholder.com/400x500?text=Leader"} 
                 alt={person.nombre}
-                className="w-full h-full object-cover rounded-[1.5rem] shadow-2xl brightness-110 contrast-110"
+                className="rounded-[1.5rem] shadow-2xl brightness-110 contrast-110"
+                containerClassName="w-full h-full rounded-[1.5rem]"
               />
               {isVertical && person.isPresidentsClub && clubPin && (
                   <div className="absolute -bottom-5 -right-5 w-20 h-20 z-30 drop-shadow-xl animate-in zoom-in duration-700 delay-500">
@@ -529,11 +585,12 @@ const AdminPortal = ({ affiliates, settings, saveAsset, deleteAsset, saveSetting
         await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'affiliates', id), { hidden: !affiliate.hidden }, { merge: true });
     };
 
-    // --- NUEVOS HANDLERS DE ASSETS ---
+    // --- NUEVOS HANDLERS DE ASSETS (Optimized) ---
     const handleImageUpload = async (e, field) => { 
         const file = e.target.files[0]; if(!file) return; 
         try { 
-            const base64 = await fileToBase64(file); 
+            // Usamos compressImage en lugar de fileToBase64
+            const base64 = await compressImage(file); 
             if (field === 'foto') setFormData(prev => ({ ...prev, foto: base64 })); 
         } catch (err) { console.error(err); } 
     };
@@ -541,7 +598,11 @@ const AdminPortal = ({ affiliates, settings, saveAsset, deleteAsset, saveSetting
     // Guardar PIN: Usa saveAsset (doc separado)
     const handlePinUpload = async (e, rankName) => { 
         const file = e.target.files[0]; if(!file) return; 
-        try { const base64 = await fileToBase64(file); await saveAsset(`rank-${rankName}`, base64); } catch(err) { console.error(err); } 
+        try { 
+            // Usamos compressImage
+            const base64 = await compressImage(file); 
+            await saveAsset(`rank-${rankName}`, base64); 
+        } catch(err) { console.error(err); } 
     };
 
     // Guardar URL PIN: Usa saveAsset
@@ -552,7 +613,11 @@ const AdminPortal = ({ affiliates, settings, saveAsset, deleteAsset, saveSetting
     // Guardar CLUB PIN: Usa saveAsset
     const handleClubPinUpload = async (e) => { 
         const file = e.target.files[0]; if(!file) return; 
-        try { const base64 = await fileToBase64(file); await saveAsset('club-pin', base64); } catch(err) { console.error(err); } 
+        try { 
+            // Usamos compressImage
+            const base64 = await compressImage(file); 
+            await saveAsset('club-pin', base64); 
+        } catch(err) { console.error(err); } 
     };
 
     const handleClubPinURL = async (e) => {
@@ -651,6 +716,12 @@ const AdminPortal = ({ affiliates, settings, saveAsset, deleteAsset, saveSetting
                                         </div>
                                     )}
 
+                                    {/* Botón de carga de imagen con optimización */}
+                                    <label className="block w-full border border-dashed border-white/20 py-3 rounded-xl text-xs uppercase tracking-widest text-white/40 hover:text-white hover:border-white hover:bg-white/5 transition-all flex items-center justify-center gap-2 cursor-pointer">
+                                        <Upload size={14} /> Cargar Foto (Optimizada)
+                                        <input type="file" className="hidden" accept="image/*" onChange={(e) => handleImageUpload(e, 'foto')} />
+                                    </label>
+
                                     <button onClick={handleSaveAffiliate} className="w-full bg-white text-black font-bold py-4 rounded-xl uppercase text-xs tracking-widest hover:bg-[#D4AF37] transition-all">{editingId ? 'Actualizar' : 'Guardar'}</button>
                                 </div>
                                 <div className="mt-6 pt-6 border-t border-white/10">
@@ -678,7 +749,14 @@ const AdminPortal = ({ affiliates, settings, saveAsset, deleteAsset, saveSetting
                                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                                                         {items.map(a => (
                                                             <div key={a.id} className="flex items-center gap-3 p-3 bg-black/40 rounded-xl border border-transparent hover:border-white/10 transition-all">
-                                                                <img src={a.foto || "https://via.placeholder.com/100"} className="w-10 h-10 rounded-lg object-cover" />
+                                                                {/* Uso de ImageWithSkeleton en lista de líderes */}
+                                                                <ImageWithSkeleton 
+                                                                    src={a.foto} 
+                                                                    alt={a.nombre}
+                                                                    className="rounded-lg object-cover"
+                                                                    containerClassName="w-10 h-10 rounded-lg flex-shrink-0"
+                                                                    placeholderIcon={true}
+                                                                />
                                                                 <div className="flex-1 min-w-0"><div className="text-sm font-bold text-white/90 truncate">{a.nombre}</div><div className="text-[9px] text-white/40 truncate">{a.distribuidorId || 'Sin ID'} | {a.pais}</div></div>
                                                                 <div className="flex gap-1"><button onClick={() => toggleHide(a.id)} className="p-2 hover:bg-white/10 rounded-lg">{a.hidden ? <EyeOff size={14} /> : <Eye size={14} />}</button><button onClick={() => {setFormData(a); setEditingId(a.id);}} className="p-2 hover:bg-white/10 rounded-lg"><Edit size={14} /></button><button onClick={() => setDeleteModal({ open: true, id: a.id })} className="p-2 hover:bg-red-500/20 text-red-500 rounded-lg"><Trash2 size={14} /></button></div>
                                                             </div>
@@ -701,9 +779,13 @@ const AdminPortal = ({ affiliates, settings, saveAsset, deleteAsset, saveSetting
                                         <div key={rank.name} className="flex flex-col gap-3 p-4 bg-black/40 rounded-xl border border-white/5 hover:border-white/10 transition-colors">
                                             <div className="flex items-center gap-4">
                                                 <label className="relative cursor-pointer group flex-shrink-0">
-                                                    <div className="w-14 h-14 bg-white/5 rounded-lg flex items-center justify-center overflow-hidden border border-white/10 group-hover:border-[#D4AF37] transition-colors">
-                                                        {settings.rankPins[rank.name] ? (<img src={settings.rankPins[rank.name]} className="w-full h-full object-contain p-2" />) : <Upload size={18} className="text-white/20 group-hover:text-white" />}
-                                                    </div>
+                                                    {/* ImageWithSkeleton para los pines */}
+                                                    <ImageWithSkeleton 
+                                                        src={settings.rankPins[rank.name]}
+                                                        className="object-contain p-2"
+                                                        containerClassName="w-14 h-14 bg-white/5 rounded-lg flex items-center justify-center border border-white/10 group-hover:border-[#D4AF37] transition-colors"
+                                                        placeholderIcon={true}
+                                                    />
                                                     <input type="file" className="hidden" accept="image/*" onChange={(e) => handlePinUpload(e, rank.name)} />
                                                 </label>
                                                 <div className="flex-1 min-w-0">
@@ -724,7 +806,19 @@ const AdminPortal = ({ affiliates, settings, saveAsset, deleteAsset, saveSetting
                                 <div className="bg-[#0f0f0f] border border-white/5 rounded-3xl p-8 text-center">
                                     <h3 className="text-sm font-bold uppercase tracking-widest text-[#D4AF37] mb-6">President's Club</h3>
                                     <label className="block w-40 h-40 mx-auto bg-black rounded-full border border-dashed border-white/20 hover:border-[#D4AF37] cursor-pointer flex items-center justify-center relative overflow-hidden group transition-all mb-4">
-                                        {settings.presidentsClubPin ? (<img src={settings.presidentsClubPin} className="w-full h-full object-contain p-6" />) : (<div className="flex flex-col items-center gap-2 text-white/30 group-hover:text-[#D4AF37]"><Upload size={24} /><span className="text-[10px] uppercase tracking-wider">Cargar Pin</span></div>)}
+                                        {/* ImageWithSkeleton para el Club Pin */}
+                                        <ImageWithSkeleton 
+                                            src={settings.presidentsClubPin}
+                                            className="object-contain p-6"
+                                            containerClassName="w-full h-full"
+                                        >
+                                            {!settings.presidentsClubPin && (
+                                                <div className="flex flex-col items-center gap-2 text-white/30 group-hover:text-[#D4AF37]">
+                                                    <Upload size={24} />
+                                                    <span className="text-[10px] uppercase tracking-wider">Cargar Pin</span>
+                                                </div>
+                                            )}
+                                        </ImageWithSkeleton>
                                         <input type="file" className="hidden" accept="image/*" onChange={handleClubPinUpload} />
                                     </label>
                                     <div className="relative mb-4">
@@ -769,6 +863,7 @@ const App = () => {
   const [view, setView] = useState('tv');
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isAdminAuthenticated, setIsAdminAuthenticated] = useState(false);
+  const [stylesLoaded, setStylesLoaded] = useState(false); // Estado para controlar la carga de estilos
 
   useEffect(() => {
     const initAuth = async () => {
@@ -784,10 +879,26 @@ const App = () => {
 
   // Inject Tailwind via CDN if not available (Fallback for local testing without build setup)
   useEffect(() => {
-    if (!document.querySelector('script[src*="tailwindcss"]')) {
+    // Si ya existe tailwind en window, marcamos como cargado
+    if (window.tailwind) {
+      setStylesLoaded(true);
+      return;
+    }
+
+    // Buscamos si ya hay un script insertado
+    const existingScript = document.querySelector('script[src*="tailwindcss"]');
+    
+    if (existingScript) {
+      // Si existe pero no ha cargado, esperamos
+      existingScript.addEventListener('load', () => setStylesLoaded(true));
+      // Fallback por si ya cargó antes del listener
+      setTimeout(() => setStylesLoaded(true), 500);
+    } else {
+      // Si no existe, lo creamos
       const script = document.createElement('script');
       script.src = "https://cdn.tailwindcss.com";
       script.async = true;
+      script.onload = () => setStylesLoaded(true);
       document.head.appendChild(script);
     }
   }, []);
@@ -894,6 +1005,21 @@ const App = () => {
   }, [currentIndex, timeline, view]);
 
   const currentScreen = timeline[currentIndex] || { type: 'empty', theme: ["#000000", "#111111", "#000000"] };
+
+  // Pantalla de carga para evitar FOUC
+  if (!stylesLoaded) {
+    return (
+      <div style={{ 
+        position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', 
+        backgroundColor: '#020617', 
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        color: '#D4AF37', fontFamily: 'sans-serif', fontSize: '1.5rem', fontWeight: 'bold',
+        zIndex: 9999
+      }}>
+        Cargando recursos...
+      </div>
+    );
+  }
 
   if (view === 'admin') {
       return (
