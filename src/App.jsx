@@ -158,13 +158,19 @@ const NameDisplay = ({ name = "", isSmall = false, maxLines = null }) => {
     }
     
     const length = name.length;
-    let sizeClass = 'text-[1em]';
-    if (length > 25) sizeClass = 'text-[0.7em]';
-    else if (length > 18) sizeClass = 'text-[0.85em]';
+    let sizeClass = 'text-[1em] leading-tight';
+
+    // Lógica de escalado dinámica y agresiva para evitar cortes ("...")
+    // Si el nombre es muy largo, reducimos el tamaño de fuente y el interlineado
+    if (length > 45) sizeClass = 'text-[0.45em] leading-[1.1]';
+    else if (length > 35) sizeClass = 'text-[0.55em] leading-[1.1]';
+    else if (length > 28) sizeClass = 'text-[0.65em] leading-[1.1]';
+    else if (length > 22) sizeClass = 'text-[0.75em] leading-[1.1]';
+    else if (length > 18) sizeClass = 'text-[0.9em] leading-[1.1]';
 
     return (
         <div 
-            className="flex flex-col leading-tight w-full"
+            className="flex flex-col w-full"
             style={maxLines ? {
                 display: '-webkit-box',
                 WebkitLineClamp: maxLines,
