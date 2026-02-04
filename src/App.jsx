@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 // Se usa 'Link' de lucide-react (antes Link2) y se limpian imports
-import { Upload, Trash2, Globe, Award, Lock, CheckCircle, Edit, Monitor, Eye, EyeOff, Search, Hash, AlertTriangle, ArrowUpCircle, ChevronDown, ChevronUp, Link, X, Image as ImageIcon } from 'lucide-react';
+import { Upload, Trash2, Globe, Award, Lock, CheckCircle, Edit, Monitor, Eye, EyeOff, Search, Hash, AlertTriangle, ArrowUpCircle, ChevronDown, ChevronUp, Link, X, Image as ImageIcon, Cloud, Save } from 'lucide-react';
 
 // --- FIREBASE IMPORTS ---
 import { initializeApp } from "firebase/app";
@@ -22,7 +22,6 @@ const firebaseConfig = {
   measurementId: import.meta.env.VITE_MEASUREMENT_ID
 };
 
-
 // Inicialización segura
 const app = initializeApp(Object.keys(firebaseConfig).length > 0 ? firebaseConfig : { apiKey: "demo" }); 
 const auth = getAuth(app);
@@ -33,7 +32,7 @@ const appId = typeof __app_id !== 'undefined' ? __app_id : 'lrecognition-v1';
 const GlobalStyles = () => (
   <style>{`
     @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@100;300;400;500;700;900&display=swap');
-    body { font-family: 'Roboto', sans-serif; margin: 0; padding: 0; overflow: hidden; }
+    body { font-family: 'Roboto', sans-serif; margin: 0; padding: 0; overflow: hidden; background-color: #020617; }
     /* Optimizaciones para TV */
     * { -webkit-font-smoothing: antialiased; }
     .gpu-accelerated { transform: translateZ(0); will-change: transform, opacity; }
@@ -62,13 +61,14 @@ const CLUB_ELIGIBLE_RANKS = ["Oro", "Oro Élite", "Platino", "Platino Élite"];
 const EXTENDED_TIME_RANKS = ["Oro", "Oro Élite", "Platino", "Platino Élite"];
 
 const DEFAULT_SETTINGS = {
-    adminPassword: "admin"
+    adminPassword: "admin",
+    imgbbApiKey: "" // Nuevo campo para la API Key
 };
 
 // --- HELPERS ---
 const generateId = (prefix = 'id') => `${prefix}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
-// Función de compresión ultra-ligera: WebP a 60% de calidad
+// Función de compresión cliente (siempre necesaria antes de subir)
 const compressImage = (file) => {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -86,13 +86,11 @@ const compressImage = (file) => {
         canvas.width = width;
         canvas.height = height;
         const ctx = canvas.getContext('2d');
-        // Usamos suavizado de imagen para mejor calidad al reducir
         ctx.imageSmoothingEnabled = true;
         ctx.imageSmoothingQuality = 'high';
         ctx.drawImage(img, 0, 0, width, height);
         
-        // OPTIMIZACIÓN MÁXIMA: WebP con calidad 0.6 (60%)
-        // Esto reduce el tamaño de los assets significativamente para el TV
+        // Retorna base64 (útil para subir a ImgBB o fallback)
         resolve(canvas.toDataURL('image/webp', 0.6)); 
       };
       img.onerror = (error) => reject(error);
@@ -101,21 +99,71 @@ const compressImage = (file) => {
   });
 };
 
+// Subida a ImgBB
+const uploadToImgBB = async (base64Image, apiKey) => {
+    if (!apiKey) return base64Image; // Fallback a base64 si no hay key
+
+    try {
+        // Remover el header del base64 para la API de ImgBB
+        const imageBody = base64Image.replace(/^data:image\/\w+;base64,/, "");
+        const formData = new FormData();
+        formData.append("image", imageBody);
+
+        const response = await fetch(`https://api.imgbb.com/1/upload?key=${apiKey}`, {
+            method: "POST",
+            body: formData,
+        });
+
+        const data = await response.json();
+        if (data.success) {
+            return data.data.url;
+        } else {
+            console.error("ImgBB Error:", data);
+            throw new Error("Error subiendo a ImgBB");
+        }
+    } catch (error) {
+        console.error("Upload failed, falling back to base64", error);
+        return base64Image; // Fallback silencioso
+    }
+};
+
 const getRankPriority = (rankName) => {
     return RANKS_CONFIG.findIndex(r => r.name === rankName);
 };
 
+// --- ANIMACIONES OPTIMIZADAS PARA TV ---
+// Reemplazamos los "Slides" largos (x: 100%) por "Drifts" cortos (x: 40px) y Fades
 const getVariants = (screen) => {
     const isVerticalLayout = screen.type === 'affiliate' && screen.rankConfig.layout === 'vertical';
     const isSeparator = screen.type === 'separator';
-    if (isVerticalLayout) return { enter: { y: '-100%', opacity: 0 }, center: { y: 0, opacity: 1 }, exit: { y: '100%', opacity: 0 } };
-    else if (isSeparator) return { enter: { scale: 0.8, opacity: 0 }, center: { scale: 1, opacity: 1 }, exit: { scale: 1.2, opacity: 0 } };
-    return { enter: { x: '100%', opacity: 0 }, center: { x: 0, opacity: 1 }, exit: { x: '-100%', opacity: 0 } };
+
+    if (isVerticalLayout) {
+        // Fade Up suave (Drift vertical de 40px)
+        return { 
+            enter: { y: 40, opacity: 0 }, 
+            center: { y: 0, opacity: 1 }, 
+            exit: { y: -40, opacity: 0 } 
+        };
+    } else if (isSeparator) {
+        // Zoom suave
+        return { 
+            enter: { scale: 0.95, opacity: 0 }, 
+            center: { scale: 1, opacity: 1 }, 
+            exit: { scale: 1.05, opacity: 0 } 
+        };
+    }
+    
+    // Default Horizontal (Drift + Fade horizontal de 40px)
+    return { 
+        enter: { x: 40, opacity: 0 }, 
+        center: { x: 0, opacity: 1 }, 
+        exit: { x: -40, opacity: 0 } 
+    };
 };
 
 // --- COMPONENTES VISUALES ---
 
-// Componente Skeleton (Solo usado en el Dashboard Admin para feedback visual)
+// Skeleton solo para Admin
 const ImageWithSkeleton = ({ src, alt, className, containerClassName, placeholderIcon = false, children, ...props }) => {
     const [loaded, setLoaded] = useState(false);
     const [error, setError] = useState(false);
@@ -189,6 +237,7 @@ const BackgroundEffect = ({ theme = ["#1e3a8a", "#172554", "#0f172a"] }) => {
 
     return (
         <div className="absolute inset-0 z-0 overflow-hidden pointer-events-none">
+            {/* Fondo sólido base - Barato de renderizar */}
             <motion.div 
                 className="absolute inset-0 bg-black" 
                 animate={{ backgroundColor: safeTheme[2] }} 
@@ -296,9 +345,9 @@ const AffiliateView = ({ screen, clubPin, rankPins }) => {
         {items.map((person, idx) => (
           <motion.div 
             key={person.id}
-            initial={isVertical ? { y: -100, opacity: 0 } : {}}
+            initial={isVertical ? { y: 40, opacity: 0 } : {}}
             animate={isVertical ? { y: 0, opacity: 1 } : {}}
-            transition={isVertical ? { type: "spring", stiffness: 60, damping: 20, delay: idx * 0.2 } : {}}
+            transition={isVertical ? { duration: 0.8, ease: "easeOut", delay: idx * 0.2 } : {}}
             className={`
                 relative flex items-center gpu-accelerated
                 bg-[#0a0a0a]/90 border border-white/[0.08]
@@ -456,6 +505,9 @@ const AdminPortal = ({ affiliates, settings, saveAsset, deleteAsset, saveSetting
     const [editingId, setEditingId] = useState(null);
     const [searchTerm, setSearchTerm] = useState("");
     
+    // Estados para ImgBB
+    const [uploading, setUploading] = useState(false);
+    
     const [idError, setIdError] = useState("");
     const [deleteModal, setDeleteModal] = useState({ open: false, id: null });
     const [clearAllModal, setClearAllModal] = useState(false);
@@ -584,20 +636,28 @@ const AdminPortal = ({ affiliates, settings, saveAsset, deleteAsset, saveSetting
         await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'affiliates', id), { hidden: !affiliate.hidden }, { merge: true });
     };
 
+    // --- HANDLERS UNIFICADOS (SUBIDA HÍBRIDA) ---
     const handleImageUpload = async (e, field) => { 
         const file = e.target.files[0]; if(!file) return; 
+        setUploading(true);
         try { 
             const base64 = await compressImage(file); 
-            if (field === 'foto') setFormData(prev => ({ ...prev, foto: base64 })); 
+            // Intentar subir a ImgBB si hay API Key
+            const finalUrl = await uploadToImgBB(base64, settings.imgbbApiKey);
+            if (field === 'foto') setFormData(prev => ({ ...prev, foto: finalUrl })); 
         } catch (err) { console.error(err); } 
+        finally { setUploading(false); }
     };
     
     const handlePinUpload = async (e, rankName) => { 
         const file = e.target.files[0]; if(!file) return; 
+        setUploading(true);
         try { 
             const base64 = await compressImage(file); 
-            await saveAsset(`rank-${rankName}`, base64); 
+            const finalUrl = await uploadToImgBB(base64, settings.imgbbApiKey);
+            await saveAsset(`rank-${rankName}`, finalUrl); 
         } catch(err) { console.error(err); } 
+        finally { setUploading(false); }
     };
 
     const handlePinURL = async (e, rankName) => {
@@ -606,10 +666,13 @@ const AdminPortal = ({ affiliates, settings, saveAsset, deleteAsset, saveSetting
 
     const handleClubPinUpload = async (e) => { 
         const file = e.target.files[0]; if(!file) return; 
+        setUploading(true);
         try { 
             const base64 = await compressImage(file); 
-            await saveAsset('club-pin', base64); 
+            const finalUrl = await uploadToImgBB(base64, settings.imgbbApiKey);
+            await saveAsset('club-pin', finalUrl); 
         } catch(err) { console.error(err); } 
+        finally { setUploading(false); }
     };
 
     const handleClubPinURL = async (e) => {
@@ -618,6 +681,10 @@ const AdminPortal = ({ affiliates, settings, saveAsset, deleteAsset, saveSetting
 
     const handlePasswordChange = async (e) => {
         await saveSettings({ adminPassword: e.target.value });
+    };
+
+    const handleApiKeyChange = async (e) => {
+        await saveSettings({ imgbbApiKey: e.target.value });
     };
 
     const groupedAffiliates = useMemo(() => {
@@ -685,12 +752,13 @@ const AdminPortal = ({ affiliates, settings, saveAsset, deleteAsset, saveSetting
                                         </div>
                                     )}
 
-                                    <label className="block w-full border border-dashed border-white/20 py-3 rounded-xl text-xs uppercase tracking-widest text-white/40 hover:text-white hover:border-white hover:bg-white/5 transition-all flex items-center justify-center gap-2 cursor-pointer">
-                                        <Upload size={14} /> Foto (WebP Optimizada)
-                                        <input type="file" className="hidden" accept="image/*" onChange={(e) => handleImageUpload(e, 'foto')} />
+                                    <label className={`block w-full border border-dashed py-3 rounded-xl text-xs uppercase tracking-widest transition-all flex items-center justify-center gap-2 cursor-pointer ${uploading ? 'border-[#D4AF37] text-[#D4AF37] bg-[#D4AF37]/10' : 'border-white/20 text-white/40 hover:text-white hover:border-white hover:bg-white/5'}`}>
+                                        {uploading ? <Cloud className="animate-pulse" size={14} /> : <Upload size={14} />} 
+                                        {uploading ? "Subiendo..." : (settings.imgbbApiKey ? "Subir a Nube (ImgBB)" : "Subir Local (WebP)")}
+                                        <input type="file" className="hidden" accept="image/*" disabled={uploading} onChange={(e) => handleImageUpload(e, 'foto')} />
                                     </label>
 
-                                    <button onClick={handleSaveAffiliate} className="w-full bg-white text-black font-bold py-4 rounded-xl uppercase text-xs tracking-widest hover:bg-[#D4AF37] transition-all">Guardar</button>
+                                    <button disabled={uploading} onClick={handleSaveAffiliate} className="w-full bg-white text-black font-bold py-4 rounded-xl uppercase text-xs tracking-widest hover:bg-[#D4AF37] transition-all disabled:opacity-50">Guardar</button>
                                 </div>
                                 <div className="mt-6 pt-6 border-t border-white/10">
                                     <input type="file" ref={fileInputRef} hidden onChange={handleCSV} accept=".csv" />
@@ -750,7 +818,7 @@ const AdminPortal = ({ affiliates, settings, saveAsset, deleteAsset, saveSetting
                                                         containerClassName="w-14 h-14 bg-white/5 rounded-lg flex items-center justify-center border border-white/10 group-hover:border-[#D4AF37] transition-colors"
                                                         placeholderIcon={true}
                                                     />
-                                                    <input type="file" className="hidden" accept="image/*" onChange={(e) => handlePinUpload(e, rank.name)} />
+                                                    <input type="file" className="hidden" accept="image/*" disabled={uploading} onChange={(e) => handlePinUpload(e, rank.name)} />
                                                 </label>
                                                 <div className="text-xs font-bold text-white">{rank.name}</div>
                                                 {settings.rankPins[rank.name] && (<button onClick={() => deleteAsset(`rank-${rank.name}`)} className="p-2 text-white/20 hover:text-red-500"><Trash2 size={14} /></button>)}
@@ -779,7 +847,7 @@ const AdminPortal = ({ affiliates, settings, saveAsset, deleteAsset, saveSetting
                                                 </div>
                                             )}
                                         </ImageWithSkeleton>
-                                        <input type="file" className="hidden" accept="image/*" onChange={handleClubPinUpload} />
+                                        <input type="file" className="hidden" accept="image/*" disabled={uploading} onChange={handleClubPinUpload} />
                                     </label>
                                     <div className="relative mb-4">
                                         <Link size={12} className="absolute left-3 top-3 text-white/20" />
@@ -792,9 +860,24 @@ const AdminPortal = ({ affiliates, settings, saveAsset, deleteAsset, saveSetting
                     )}
                     {activeTab === 'security' && (
                         <div className="w-full max-w-lg mx-auto bg-[#0f0f0f] border border-white/5 rounded-3xl p-12 self-center">
-                            <h3 className="text-xl font-bold text-white mb-8 text-center">Seguridad</h3>
-                            <label className="text-[10px] uppercase text-white/40 font-bold ml-1 mb-2 block">Nueva Contraseña</label>
-                            <input type="password" value={settings.adminPassword} onChange={handlePasswordChange} className="w-full bg-black border border-white/10 rounded-xl p-4 text-white focus:border-[#D4AF37] outline-none text-center text-lg" />
+                            <div className="mb-8">
+                                <h3 className="text-xl font-bold text-white mb-6 text-center">Seguridad y Nube</h3>
+                                
+                                <div className="p-4 bg-blue-500/10 border border-blue-500/30 rounded-xl mb-6">
+                                    <h4 className="text-sm font-bold text-blue-400 mb-2 flex items-center gap-2"><Cloud size={16} /> Optimización de Imágenes (Recomendado)</h4>
+                                    <p className="text-[10px] text-blue-200/70 leading-relaxed mb-3">
+                                        Para mejorar drásticamente la velocidad en TVs, usa una API Key gratuita de <strong>ImgBB</strong>. Esto guardará las imágenes en su nube y no en la base de datos local.
+                                    </p>
+                                    <label className="text-[10px] uppercase text-white/40 font-bold ml-1 mb-2 block">ImgBB API Key (Opcional)</label>
+                                    <div className="flex gap-2">
+                                        <input type="text" value={settings.imgbbApiKey || ''} onChange={handleApiKeyChange} placeholder="Pega tu Key aquí (ej: 5f9d...)" className="flex-1 bg-black border border-white/10 rounded-lg p-3 text-white text-xs" />
+                                    </div>
+                                    <div className="text-[9px] text-white/20 mt-2 text-right">Consigue una key en api.imgbb.com</div>
+                                </div>
+
+                                <label className="text-[10px] uppercase text-white/40 font-bold ml-1 mb-2 block">Nueva Contraseña Admin</label>
+                                <input type="password" value={settings.adminPassword} onChange={handlePasswordChange} className="w-full bg-black border border-white/10 rounded-xl p-4 text-white focus:border-[#D4AF37] outline-none text-center text-lg tracking-widest" />
+                            </div>
                         </div>
                     )}
                 </div>
@@ -903,7 +986,10 @@ const App = () => {
         <motion.div
             key={currentScreen.id || currentIndex}
             variants={getVariants(currentScreen)} initial="enter" animate="center" exit="exit"
-            transition={{ x: { type: "spring", stiffness: 80, damping: 20 }, y: { type: "spring", stiffness: 70, damping: 20 }, opacity: { duration: 0.4 }, scale: { duration: 0.5 } }}
+            transition={{ 
+                duration: 1.2, // Transiciones más lentas y suaves para TV
+                ease: [0.16, 1, 0.3, 1] // Ease "Expo Out" suave
+            }}
             className="absolute inset-0 flex items-center justify-center z-10 w-full h-full"
         >
             {currentScreen?.type === 'separator' ? <SeparatorView screen={currentScreen} /> : currentScreen?.type === 'empty' ? (
