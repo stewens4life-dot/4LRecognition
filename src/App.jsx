@@ -224,7 +224,7 @@ const ImageWithSkeleton = ({ src, alt, className, containerClassName, placeholde
       {!loaded && !error && <div className="skeleton" style={{ position: 'absolute', inset: 0, zIndex: 10, borderRadius: 'inherit' }} />}
       <img src={src} alt={alt}
         className="gpu-layer"
-        style={{ width: '100%', height: '100%', objectFit: 'cover', transition: 'opacity 0.3s ease', opacity: loaded ? 1 : 0 }}
+        style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'top', transition: 'opacity 0.3s ease', opacity: loaded ? 1 : 0 }}
         onLoad={() => setLoaded(true)}
         onError={() => setError(true)}
         {...props}
@@ -419,6 +419,7 @@ const AffiliateView = ({ screen, clubPin, rankPins }) => {
                 src={person.foto || "https://via.placeholder.com/400x500?text=Leader"} 
                 alt={person.nombre}
                 className="w-full h-full object-cover rounded-[1.5rem] shadow-lg brightness-110 contrast-110 gpu-accelerated"
+                style={{ objectPosition: 'top' }}
                 loading="eager"
               />
               {isVertical && person.isPresidentsClub && clubPin && (
@@ -1173,7 +1174,7 @@ const AdminPortal = ({ affiliates, settings, saveAsset, deleteAsset, saveSetting
                   {/* Photo Preview */}
                   {formData.foto && (
                     <div style={{ width: '100%', height: 100, borderRadius: 12, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.08)', position: 'relative' }}>
-                      <img src={formData.foto} alt="preview" style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={e => { e.target.style.display = 'none'; }} />
+                      <img src={formData.foto} alt="preview" style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'top' }} onError={e => { e.target.style.display = 'none'; }} />
                     </div>
                   )}
 
