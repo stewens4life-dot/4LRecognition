@@ -66,6 +66,18 @@ const CSV_COLUMNS = [
 // --- HELPERS ---
 const generateId = (prefix = 'id') => `${prefix}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
+const normalizeString = (str) => {
+  if (!str) return "";
+  return str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+};
+
+const findMatchingRank = (csvRank) => {
+  if (!csvRank) return "Presidencial";
+  const normalizedInput = normalizeString(csvRank);
+  const match = RANKS_CONFIG.find(r => normalizeString(r.name) === normalizedInput);
+  return match ? match.name : csvRank; // If no match, keep original so it falls into "Sin Rango"
+};
+
 const getRankPriority = (rankName) => RANKS_CONFIG.findIndex(r => r.name === rankName);
 
 const compressImage = (file) => {
@@ -783,7 +795,9 @@ const AdminPortal = ({ affiliates, settings, saveAsset, deleteAsset, saveSetting
         if (!obj.distribuidorId || !obj.nombre) { obj.hasError = true; previewRows.push(obj); return; }
         if (processedIds.has(obj.distribuidorId)) { obj.isDuplicate = true; previewRows.push(obj); return; }
         processedIds.add(obj.distribuidorId);
-        if (!obj.rango) obj.rango = "Presidencial";
+        
+        // Normalize rank
+        obj.rango = findMatchingRank(obj.rango);
 
         const existing = affiliates.find(a => a.distribuidorId === obj.distribuidorId);
         if (existing) {
@@ -914,6 +928,14 @@ const AdminPortal = ({ affiliates, settings, saveAsset, deleteAsset, saveSetting
       const inRank = filtered.filter(a => a.rango === rank.name);
       if (inRank.length > 0) grouped[rank.name] = inRank;
     });
+    
+    // Catch-all for invalid ranks
+    const validRanks = RANKS_CONFIG.map(r => r.name);
+    const invalidRankAffiliates = filtered.filter(a => !validRanks.includes(a.rango));
+    if (invalidRankAffiliates.length > 0) {
+      grouped["Otros / Sin Rango"] = invalidRankAffiliates;
+    }
+    
     return grouped;
   }, [affiliates, searchTerm]);
 
@@ -1133,15 +1155,18 @@ const AdminPortal = ({ affiliates, settings, saveAsset, deleteAsset, saveSetting
                     {Object.entries(groupedAffiliates).map(([rank, items]) => {
                       const rankConfig = RANKS_CONFIG.find(r => r.name === rank);
                       const isExpanded = expandedRanks[rank];
+                      const isInvalidGroup = rank === "Otros / Sin Rango";
+                      
                       return (
-                        <div key={rank} className="glass-card" style={{ borderRadius: 16, overflow: 'hidden' }}>
+                        <div key={rank} className="glass-card" style={{ borderRadius: 16, overflow: 'hidden', border: isInvalidGroup ? '1px solid rgba(255,69,58,0.3)' : undefined }}>
                           {/* Rank header */}
-                          <button onClick={() => toggleRank(rank)} style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px', cursor: 'pointer', transition: 'background 0.2s', background: 'none' }}
-                            onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.03)'}
-                            onMouseLeave={e => e.currentTarget.style.background = 'none'}>
+                          <button onClick={() => toggleRank(rank)} style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px', cursor: 'pointer', transition: 'background 0.2s', background: isInvalidGroup ? 'rgba(255,69,58,0.1)' : 'none' }}
+                            onMouseEnter={e => e.currentTarget.style.background = isInvalidGroup ? 'rgba(255,69,58,0.2)' : 'rgba(255,255,255,0.03)'}
+                            onMouseLeave={e => e.currentTarget.style.background = isInvalidGroup ? 'rgba(255,69,58,0.1)' : 'none'}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                              <div style={{ width: 10, height: 10, borderRadius: 3, background: rankConfig?.color || '#fff', flexShrink: 0 }} />
-                              <span style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: rankConfig?.color || '#fff' }}>{rank}</span>
+                              <div style={{ width: 10, height: 10, borderRadius: 3, background: rankConfig?.color || '#ff453a', flexShrink: 0 }} />
+                              <span style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: rankConfig?.color || '#ff453a' }}>{rank}</span>
+                              {isInvalidGroup && <AlertCircle size={14} style={{ color: '#ff453a' }} />}
                               <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.35)', fontWeight: 500 }}>({items.length})</span>
                             </div>
                             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -1152,7 +1177,7 @@ const AdminPortal = ({ affiliates, settings, saveAsset, deleteAsset, saveSetting
 
                           {/* Items */}
                           {isExpanded && (
-                            <div style={{ padding: '0 12px 12px', borderTop: '1px solid rgba(255,255,255,0.05)', display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 8, paddingTop: 12 }}>
+                            <div style={{ padding: '0 12px 12px', borderTop: isInvalidGroup ? '1px solid rgba(255,69,58,0.2)' : '1px solid rgba(255,255,255,0.05)', display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 8, paddingTop: 12 }}>
                               {items.map(a => (
                                 <div key={a.id} className="person-card" style={{ opacity: a.hidden ? 0.45 : 1 }}>
                                   {/* Avatar */}
@@ -1166,7 +1191,8 @@ const AdminPortal = ({ affiliates, settings, saveAsset, deleteAsset, saveSetting
                                     <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 3 }}>
                                       <code style={{ fontSize: 10, color: 'rgba(255,255,255,0.30)', background: 'rgba(255,255,255,0.05)', padding: '1px 5px', borderRadius: 4 }}>{a.distribuidorId}</code>
                                       {a.pais && <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.35)' }}>· {a.pais}</span>}
-                                      {a.isPresidentsClub && <span className="info-pill gold" style={{ padding: '1px 5px', fontSize: 9 }}>PC</span>}
+                                      {isInvalidGroup && <span style={{ fontSize: 10, color: '#ff453a', fontWeight: 600 }}>Rango: "{a.rango}"</span>}
+                                      {a.isPresidentsClub && !isInvalidGroup && <span className="info-pill gold" style={{ padding: '1px 5px', fontSize: 9 }}>PC</span>}
                                     </div>
                                   </div>
 
@@ -1176,8 +1202,9 @@ const AdminPortal = ({ affiliates, settings, saveAsset, deleteAsset, saveSetting
                                       title={a.hidden ? 'Mostrar' : 'Ocultar'}>
                                       {a.hidden ? <EyeOff size={12} /> : <Eye size={12} />}
                                     </button>
-                                    <button onClick={() => { setEditingId(a.id); setFormData({ distribuidorId: a.distribuidorId || '', nombre: a.nombre || '', rango: a.rango || 'Presidencial', pais: a.pais || '', frase: a.frase || '', foto: a.foto || '', isPresidentsClub: a.isPresidentsClub || false, hidden: a.hidden || false }); }}
-                                      style={{ width: 30, height: 30, borderRadius: 8, background: 'rgba(255,255,255,0.05)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', transition: 'all 0.2s', color: 'rgba(255,255,255,0.40)' }}>
+                                    <button onClick={() => { setEditingId(a.id); setFormData({ distribuidorId: a.distribuidorId || '', nombre: a.nombre || '', rango: isInvalidGroup ? 'Presidencial' : (a.rango || 'Presidencial'), pais: a.pais || '', frase: a.frase || '', foto: a.foto || '', isPresidentsClub: a.isPresidentsClub || false, hidden: a.hidden || false }); }}
+                                      style={{ width: 30, height: 30, borderRadius: 8, background: 'rgba(255,255,255,0.05)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', transition: 'all 0.2s', color: isInvalidGroup ? '#ff453a' : 'rgba(255,255,255,0.40)' }}
+                                      title={isInvalidGroup ? 'Asignar rango correcto' : 'Editar'}>
                                       <Edit size={12} />
                                     </button>
                                     <button onClick={() => setDeleteModal({ open: true, id: a.id, name: a.nombre })}
