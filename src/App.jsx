@@ -618,9 +618,9 @@ D003;Ana Torres;Bronce;Argentina;;;`}
 // =====================================================
 // CSV PREVIEW MODAL
 // =====================================================
-const CSVPreviewModal = ({ isOpen, onClose, onConfirm, previewData, conflicts }) => {
-  const toAdd = previewData.filter(r => !r.isConflict && !r.isDuplicate);
-  const toUpdate = previewData.filter(r => r.isConflict);
+const CSVPreviewModal = ({ isOpen, onClose, onConfirm, previewData }) => {
+  const toAdd = previewData.filter(r => !r.isUpdate && !r.isDuplicate && !r.hasError);
+  const toUpdate = previewData.filter(r => r.isUpdate);
   const skipped = previewData.filter(r => r.isDuplicate || r.hasError);
 
   return (
@@ -645,8 +645,8 @@ const CSVPreviewModal = ({ isOpen, onClose, onConfirm, previewData, conflicts })
         {/* Summary pills */}
         <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexShrink: 0, flexWrap: 'wrap' }}>
           <span className="info-pill green"><CheckCircle size={11} />{toAdd.length} nuevos</span>
-          {toUpdate.length > 0 && <span className="info-pill gold"><ArrowUpCircle size={11} />{toUpdate.length} actualizaciones de rango</span>}
-          {skipped.length > 0 && <span className="info-pill red"><AlertCircle size={11} />{skipped.length} omitidos</span>}
+          {toUpdate.length > 0 && <span className="info-pill gold"><ArrowUpCircle size={11} />{toUpdate.length} actualizaciones detectadas</span>}
+          {skipped.length > 0 && <span className="info-pill red"><AlertCircle size={11} />{skipped.length} omitidos (sin cambios)</span>}
         </div>
 
         {/* Table */}
@@ -676,8 +676,8 @@ const CSVPreviewModal = ({ isOpen, onClose, onConfirm, previewData, conflicts })
                   <td style={{ color: 'rgba(255,255,255,0.50)', fontSize: 12 }}>{row.pais || '—'}</td>
                   <td>
                     {row.hasError ? <span className="info-pill red"><AlertCircle size={9} />Error</span>
-                      : row.isDuplicate ? <span className="info-pill" style={{ background: 'rgba(255,255,255,0.05)', color: 'rgba(255,255,255,0.35)', border: '1px solid rgba(255,255,255,0.08)', fontSize: 9 }}>Duplicado</span>
-                        : row.isConflict ? <span className="info-pill gold"><ArrowUpCircle size={9} />Mejora rango: {row.newRango}</span>
+                      : row.isDuplicate ? <span className="info-pill" style={{ background: 'rgba(255,255,255,0.05)', color: 'rgba(255,255,255,0.35)', border: '1px solid rgba(255,255,255,0.08)', fontSize: 9 }}>Sin cambios</span>
+                        : row.isUpdate ? <span className="info-pill gold" title={row.changesDesc}><ArrowUpCircle size={9} />Actualizar: {row.changesDesc}</span>
                           : <span className="info-pill green"><Plus size={9} />Nuevo</span>}
                   </td>
                 </tr>
@@ -897,18 +897,31 @@ const AdminPortal = ({ affiliates, settings, saveAsset, deleteAsset, saveSetting
         if (existing) {
           const oldP = getRankPriority(existing.rango);
           const newP = getRankPriority(obj.rango);
-          if (newP > oldP) { obj.isConflict = true; obj.newRango = obj.rango; obj.originalId = existing.id; }
-          else { obj.isDuplicate = true; }
+          
+          let hasChanges = false;
+          let changesDesc = [];
+
+          if (newP > oldP) { hasChanges = true; changesDesc.push(`Rango: ${obj.rango}`); }
+          else if (obj.rango !== existing.rango && obj.rango !== "Presidencial") { hasChanges = true; changesDesc.push(`Rango`); }
+          
+          if (obj.foto && obj.foto !== existing.foto) { hasChanges = true; changesDesc.push('Foto'); }
+          if (obj.frase && obj.frase !== existing.frase) { hasChanges = true; changesDesc.push('Frase'); }
+          if (obj.nombre && obj.nombre !== existing.nombre) { hasChanges = true; changesDesc.push('Nombre'); }
+          if (obj.pais && obj.pais !== existing.pais) { hasChanges = true; changesDesc.push('País'); }
+          if (obj.isPresidentsClub !== existing.isPresidentsClub) { hasChanges = true; changesDesc.push('Club'); }
+
+          if (hasChanges) { 
+            obj.isUpdate = true; 
+            obj.changesDesc = changesDesc.join(', ');
+            obj.originalId = existing.id; 
+          } else { 
+            obj.isDuplicate = true; 
+          }
         }
         previewRows.push(obj);
       });
 
       setCsvPreviewData(previewRows);
-      const conflicts = previewRows.filter(r => r.isConflict);
-      setCsvConflicts(conflicts.map(c => ({
-        newItem: { ...c, id: c.originalId || c.id },
-        currentItem: affiliates.find(a => a.distribuidorId === c.distribuidorId) || {}
-      })));
       setCsvPreviewModal(true);
       if (fileInputRef.current) fileInputRef.current.value = "";
     };
@@ -931,9 +944,18 @@ const AdminPortal = ({ affiliates, settings, saveAsset, deleteAsset, saveSetting
         const batch = writeBatch(db);
         toUpdate.forEach(item => {
           const cleanItem = { ...item };
-          delete cleanItem.hasError; delete cleanItem.isDuplicate; delete cleanItem.isConflict; delete cleanItem.newRango; delete cleanItem.originalId;
+          delete cleanItem.hasError; delete cleanItem.isDuplicate; delete cleanItem.isUpdate; delete cleanItem.changesDesc; delete cleanItem.originalId;
           const existing = affiliates.find(a => a.distribuidorId === cleanItem.distribuidorId);
-          if (existing) batch.set(doc(db, 'artifacts', appId, 'public', 'data', 'affiliates', existing.id), { ...existing, rango: cleanItem.rango });
+          if (existing) {
+            const merged = { ...existing };
+            if (cleanItem.nombre) merged.nombre = cleanItem.nombre;
+            if (cleanItem.rango) merged.rango = cleanItem.rango;
+            if (cleanItem.pais) merged.pais = cleanItem.pais;
+            if (cleanItem.foto) merged.foto = cleanItem.foto;
+            if (cleanItem.frase) merged.frase = cleanItem.frase;
+            merged.isPresidentsClub = cleanItem.isPresidentsClub;
+            batch.set(doc(db, 'artifacts', appId, 'public', 'data', 'affiliates', existing.id), merged);
+          }
         });
         await batch.commit();
       }
