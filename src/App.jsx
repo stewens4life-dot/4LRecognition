@@ -290,13 +290,19 @@ const BackgroundEffect = ({ theme = ["#1e3a8a", "#172554", "#0f172a"] }) => {
                 transition={{ duration: 2 }} 
             />
             
+            {/* Animación GPU en vez de backgroundPosition que consume CPU */}
             <motion.div
-                className="absolute inset-0 opacity-60 gpu-accelerated"
+                className="absolute gpu-accelerated"
                 animate={{ backgroundImage: `linear-gradient(125deg, ${safeTheme[2]} 0%, ${safeTheme[1]} 40%, ${safeTheme[0]} 70%, ${safeTheme[2]} 100%)` }}
                 transition={{ duration: 2 }}
-                style={{ backgroundSize: "200% 200%" }}
+                style={{ top: '-100%', left: '-100%', width: '300%', height: '300%', opacity: 0.6 }}
             >
-                <motion.div className="w-full h-full" animate={{ backgroundPosition: ["0% 0%", "100% 100%", "0% 0%"] }} transition={{ duration: 15, repeat: Infinity, ease: "linear" }} />
+                <motion.div 
+                    className="w-full h-full gpu-accelerated" 
+                    animate={{ rotate: [0, 360] }} 
+                    transition={{ duration: 40, repeat: Infinity, ease: "linear" }} 
+                    style={{ background: 'inherit' }} 
+                />
             </motion.div>
             
             <div className="absolute top-[-10%] right-[-10%] w-[80vw] h-[80vh] opacity-40">
@@ -304,17 +310,17 @@ const BackgroundEffect = ({ theme = ["#1e3a8a", "#172554", "#0f172a"] }) => {
                     <defs><linearGradient id="gradTop" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stopColor={safeTheme[0]} stopOpacity="0.8" /><stop offset="100%" stopColor={safeTheme[1]} stopOpacity="0" /></linearGradient></defs>
                     {[0, 1].map(i => {
                         const d1 = `M${i*50},0 Q${250+i*50},${50+i*50} 500,${200+i*50}`;
-                        const d2 = `M${i*50},0 Q${250+i*50},${150+i*50} 500,${200+i*50}`;
                         return (
                             <motion.path 
                                 key={i} 
                                 fill="none" 
                                 stroke="url(#gradTop)" 
                                 strokeWidth={3} 
-                                initial={{ d: d1 }}
-                                animate={{ d: [d1, d2, d1] }} 
+                                d={d1}
+                                animate={{ scaleY: [1, 1.4, 1], y: [0, 30, 0] }} 
                                 transition={{ duration: 10 + i * 2, repeat: Infinity, ease: "easeInOut", delay: i }} 
                                 className="gpu-accelerated"
+                                style={{ transformOrigin: "center top" }}
                             />
                         );
                     })}
@@ -326,17 +332,17 @@ const BackgroundEffect = ({ theme = ["#1e3a8a", "#172554", "#0f172a"] }) => {
                     <defs><linearGradient id="gradBottom" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stopColor={safeTheme[0]} stopOpacity="0.8" /><stop offset="100%" stopColor={safeTheme[1]} stopOpacity="0" /></linearGradient></defs>
                     {[0, 1].map(i => {
                          const d1 = `M${i*50},0 Q${250+i*50},${50+i*50} 500,${200+i*50}`;
-                         const d2 = `M${i*50},0 Q${250+i*50},${150+i*50} 500,${200+i*50}`;
                         return (
                             <motion.path 
                                 key={i} 
                                 fill="none" 
                                 stroke="url(#gradBottom)" 
                                 strokeWidth={3} 
-                                initial={{ d: d1 }}
-                                animate={{ d: [d1, d2, d1] }} 
+                                d={d1}
+                                animate={{ scaleY: [1, 1.4, 1], y: [0, 30, 0] }} 
                                 transition={{ duration: 12 + i * 2, repeat: Infinity, ease: "easeInOut", delay: i }}
                                 className="gpu-accelerated" 
+                                style={{ transformOrigin: "center top" }}
                             />
                         );
                     })}
@@ -817,6 +823,35 @@ const AdminPortal = ({ affiliates, settings, saveAsset, deleteAsset, saveSetting
   const [uploading, setUploading] = useState(false);
   const [idError, setIdError] = useState("");
   const [expandedRanks, setExpandedRanks] = useState({});
+  const [selectedTvRanks, setSelectedTvRanks] = useState(RANKS_CONFIG.map(r => r.name));
+  const [customTvName, setCustomTvName] = useState("");
+
+  const handleSaveCustomTv = async () => {
+    if (!customTvName.trim() || selectedTvRanks.length === 0) return;
+    const key = customTvName.trim().toLowerCase().replace(/[^a-z0-9-_]/g, '');
+    const updated = {
+      ...(settings.customTvs || {}),
+      [key]: selectedTvRanks
+    };
+    try {
+      await saveSettings({ customTvs: updated });
+      setCustomTvName("");
+      showToast(`Pantalla "${key}" guardada con éxito`, "success");
+    } catch {
+      showToast("Error al guardar la pantalla", "error");
+    }
+  };
+
+  const handleDeleteCustomTv = async (nameToDelete) => {
+    const updated = { ...(settings.customTvs || {}) };
+    delete updated[nameToDelete];
+    try {
+      await saveSettings({ customTvs: updated });
+      showToast(`Pantalla "${nameToDelete}" eliminada`, "info");
+    } catch {
+      showToast("Error al eliminar la pantalla", "error");
+    }
+  };
 
   // Modals
   const [deleteModal, setDeleteModal] = useState({ open: false, id: null, name: '' });
@@ -1066,6 +1101,7 @@ const AdminPortal = ({ affiliates, settings, saveAsset, deleteAsset, saveSetting
   const tabs = [
     { id: 'leaders', label: 'Líderes', icon: <Users size={13} /> },
     { id: 'settings', label: 'Pines', icon: <Star size={13} /> },
+    { id: 'tvs', label: 'Pantallas TV', icon: <Monitor size={13} /> },
     { id: 'security', label: 'Seguridad', icon: <Shield size={13} /> },
   ];
 
@@ -1446,6 +1482,285 @@ const AdminPortal = ({ affiliates, settings, saveAsset, deleteAsset, saveSetting
             </div>
           </div>
         )}
+        {/* ==================== TAB: TVS ==================== */}
+        {activeTab === 'tvs' && (
+          <div style={{ flex: 1, display: 'flex', gap: 16, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+            
+            {/* Left side: Custom TV Generator */}
+            <div className="glass-card" style={{ flex: 2, minWidth: 400, padding: '28px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 24, paddingBottom: 20, borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
+                <div style={{ width: 40, height: 40, borderRadius: 12, background: 'rgba(212,175,55,0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <Sparkles size={18} style={{ color: '#D4AF37' }} />
+                </div>
+                <div>
+                  <h3 style={{ fontSize: 15, fontWeight: 700, color: 'white' }}>Generador de TV Personalizado</h3>
+                  <p style={{ fontSize: 12, color: 'rgba(255,255,255,0.40)' }}>Elige exactamente qué rangos mostrar en esta pantalla</p>
+                </div>
+              </div>
+
+              {/* Quick toggles */}
+              <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+                <button 
+                  onClick={() => setSelectedTvRanks(RANKS_CONFIG.map(r => r.name))}
+                  className="btn-ghost"
+                  style={{ padding: '6px 12px', fontSize: 11, borderRadius: 8, cursor: 'pointer', border: '1px solid rgba(255,255,255,0.1)' }}
+                >
+                  Seleccionar todos
+                </button>
+                <button 
+                  onClick={() => setSelectedTvRanks([])}
+                  className="btn-ghost"
+                  style={{ padding: '6px 12px', fontSize: 11, borderRadius: 8, cursor: 'pointer', border: '1px solid rgba(255,255,255,0.1)' }}
+                >
+                  Desmarcar todos
+                </button>
+              </div>
+
+              {/* Ranks selection grid */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 10, marginBottom: 24 }}>
+                {RANKS_CONFIG.map(rank => {
+                  const isChecked = selectedTvRanks.includes(rank.name);
+                  return (
+                    <div 
+                      key={rank.name}
+                      onClick={() => {
+                        setSelectedTvRanks(prev => 
+                          prev.includes(rank.name) 
+                            ? prev.filter(r => r !== rank.name) 
+                            : [...prev, rank.name]
+                        );
+                      }}
+                      style={{ 
+                        display: 'flex', 
+                        alignItems: 'center', 
+                        gap: 10, 
+                        padding: '12px', 
+                        borderRadius: 12, 
+                        border: `1px solid ${isChecked ? 'rgba(255,255,255,0.15)' : 'rgba(255,255,255,0.05)'}`,
+                        background: isChecked ? 'rgba(255,255,255,0.06)' : 'rgba(255,255,255,0.02)',
+                        cursor: 'pointer',
+                        transition: 'all 0.2s ease'
+                      }}
+                    >
+                      <input 
+                        type="checkbox" 
+                        checked={isChecked}
+                        readOnly
+                        style={{ cursor: 'pointer' }}
+                      />
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <div style={{ width: 8, height: 8, borderRadius: '50%', background: rank.color }} />
+                        <span style={{ fontSize: 12, fontWeight: 500, color: isChecked ? 'white' : 'rgba(255,255,255,0.5)' }}>{rank.name}</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Dynamic URL output */}
+              {selectedTvRanks.length === 0 ? (
+                <div style={{ padding: '16px', background: 'rgba(255,69,58,0.08)', borderRadius: 12, border: '1px solid rgba(255,69,58,0.2)', color: '#ff453a', fontSize: 12 }}>
+                  ⚠️ Selecciona al menos un rango para generar la pantalla de TV personalizada.
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                  {/* On-the-fly URL */}
+                  <div style={{ padding: '20px', background: 'rgba(255,255,255,0.03)', borderRadius: 16, border: '1px solid rgba(255,255,255,0.08)' }}>
+                    <label style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'rgba(255,255,255,0.40)', display: 'block', marginBottom: 8 }}>Enlace Directo Temporal</label>
+                    <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 16 }}>
+                      <div className="apple-input" style={{ flex: 1, fontSize: 11, fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', background: 'rgba(0,0,0,0.2)', padding: '10px 12px', borderRadius: 8, border: '1px solid rgba(255,255,255,0.05)', color: '#60a5fa' }}>
+                        {window.location.origin}/?ranks={selectedTvRanks.join(',')}
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', gap: 10 }}>
+                      <button 
+                        onClick={() => {
+                          const url = `${window.location.origin}/?ranks=${selectedTvRanks.join(',')}`;
+                          navigator.clipboard.writeText(url);
+                          showToast("¡Enlace copiado al portapapeles!", "success");
+                        }}
+                        className="btn-ghost" 
+                        style={{ flex: 1, padding: '10px 16px', borderRadius: 10, fontSize: 12, fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, border: '1px solid rgba(255,255,255,0.1)', color: 'white', cursor: 'pointer' }}
+                      >
+                        <Link size={14} /> Copiar
+                      </button>
+                      <a 
+                        href={`/?ranks=${selectedTvRanks.join(',')}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="btn-ghost"
+                        style={{ flex: 1, padding: '10px 16px', borderRadius: 10, fontSize: 12, fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, textDecoration: 'none', color: 'white', border: '1px solid rgba(255,255,255,0.1)', cursor: 'pointer', textAlign: 'center' }}
+                      >
+                        <Monitor size={14} /> Abrir ↗
+                      </a>
+                    </div>
+                  </div>
+
+                  {/* Custom URL Customizer */}
+                  <div style={{ padding: '20px', background: 'rgba(10,132,255,0.04)', borderRadius: 16, border: '1px solid rgba(10,132,255,0.15)' }}>
+                    <label style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: '#60a5fa', display: 'block', marginBottom: 8 }}>Personalizar URL (Guardar Pantalla)</label>
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12 }}>
+                      <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.4)', fontFamily: 'monospace' }}>/?tv=</span>
+                      <input 
+                        type="text" 
+                        placeholder="ej: vip, sala-1" 
+                        value={customTvName}
+                        onChange={e => setCustomTvName(e.target.value.toLowerCase().replace(/[^a-z0-9-_]/g, ''))}
+                        className="apple-input"
+                        style={{ fontSize: 12, flex: 1 }}
+                      />
+                    </div>
+                    <button 
+                      onClick={handleSaveCustomTv}
+                      disabled={!customTvName.trim()}
+                      className="btn-primary" 
+                      style={{ 
+                        width: '100%', 
+                        padding: '12px 16px', 
+                        borderRadius: 10, 
+                        fontSize: 12, 
+                        fontWeight: 600, 
+                        display: 'flex', 
+                        alignItems: 'center', 
+                        justifyContent: 'center', 
+                        gap: 6, 
+                        background: customTvName.trim() ? '#D4AF37' : 'rgba(255,255,255,0.05)', 
+                        color: customTvName.trim() ? '#000' : 'rgba(255,255,255,0.3)', 
+                        cursor: customTvName.trim() ? 'pointer' : 'not-allowed' 
+                      }}
+                    >
+                      <Save size={14} /> Guardar Pantalla Personalizada
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Right side: TV Presets & Tips */}
+            <div style={{ flex: 1, minWidth: 320, display: 'flex', flexDirection: 'column', gap: 16 }}>
+              {/* Saved Custom Screens Card */}
+              {settings.customTvs && Object.keys(settings.customTvs).length > 0 && (
+                <div className="glass-card" style={{ padding: '24px' }}>
+                  <h4 style={{ fontSize: 13, fontWeight: 700, color: 'white', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <Monitor size={14} style={{ color: '#60a5fa' }} /> Mis Pantallas Personalizadas
+                  </h4>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    {Object.entries(settings.customTvs).map(([name, ranks]) => (
+                      <div key={name} style={{ padding: '12px', background: 'rgba(255,255,255,0.02)', borderRadius: 12, border: '1px solid rgba(255,255,255,0.05)' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                          <span style={{ fontSize: 12, fontWeight: 700, color: 'white', fontFamily: 'monospace' }}>/?tv={name}</span>
+                          <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+                            <a href={`/?tv=${name}`} target="_blank" rel="noreferrer" style={{ fontSize: 11, color: '#60a5fa', textDecoration: 'none' }}>Abrir ↗</a>
+                            <button 
+                              onClick={() => handleDeleteCustomTv(name)}
+                              style={{ background: 'none', border: 'none', padding: 0, color: '#ff453a', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
+                              title="Eliminar pantalla"
+                            >
+                              <Trash2 size={12} />
+                            </button>
+                          </div>
+                        </div>
+                        <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.4)', marginBottom: 8, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          Rangos: {ranks.join(', ')}
+                        </div>
+                        <button 
+                          onClick={() => {
+                            navigator.clipboard.writeText(window.location.origin + `/?tv=${name}`);
+                            showToast(`Link "/?tv=${name}" copiado`, "success");
+                          }}
+                          style={{ fontSize: 10, color: 'rgba(255,255,255,0.6)', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', padding: '4px 8px', borderRadius: 6, cursor: 'pointer' }}
+                        >
+                          Copiar Link
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {/* Presets Card */}
+              <div className="glass-card" style={{ padding: '24px' }}>
+                <h4 style={{ fontSize: 13, fontWeight: 700, color: 'white', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <Layers size={14} style={{ color: '#D4AF37' }} /> Pantallas Prediseñadas
+                </h4>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  <div style={{ padding: '12px', background: 'rgba(255,255,255,0.02)', borderRadius: 12, border: '1px solid rgba(255,255,255,0.05)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: 'white' }}>TV Principal (Todos)</span>
+                      <a href="/" target="_blank" rel="noreferrer" style={{ fontSize: 11, color: '#60a5fa', textDecoration: 'none' }}>Abrir ↗</a>
+                    </div>
+                    <p style={{ fontSize: 10, color: 'rgba(255,255,255,0.4)', marginBottom: 8 }}>Muestra el carrusel completo de todos los líderes registrados.</p>
+                    <button 
+                      onClick={() => {
+                        navigator.clipboard.writeText(window.location.origin + '/');
+                        showToast("Link de TV Principal copiado", "success");
+                      }}
+                      style={{ fontSize: 10, color: 'rgba(255,255,255,0.6)', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', padding: '4px 8px', borderRadius: 6, cursor: 'pointer' }}
+                    >
+                      Copiar Link
+                    </button>
+                  </div>
+
+                  <div style={{ padding: '12px', background: 'rgba(10,132,255,0.04)', borderRadius: 12, border: '1px solid rgba(10,132,255,0.15)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: 'white' }}>TV 1: Presidencial a Bronce Élite</span>
+                      <a href="/?tv=1" target="_blank" rel="noreferrer" style={{ fontSize: 11, color: '#60a5fa', textDecoration: 'none' }}>Abrir ↗</a>
+                    </div>
+                    <p style={{ fontSize: 10, color: 'rgba(255,255,255,0.4)', marginBottom: 8 }}>Ideal para la primera pantalla en configuraciones duales.</p>
+                    <button 
+                      onClick={() => {
+                        navigator.clipboard.writeText(window.location.origin + '/?tv=1');
+                        showToast("Link de TV 1 copiado", "success");
+                      }}
+                      style={{ fontSize: 10, color: 'rgba(255,255,255,0.6)', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', padding: '4px 8px', borderRadius: 6, cursor: 'pointer' }}
+                    >
+                      Copiar Link
+                    </button>
+                  </div>
+
+                  <div style={{ padding: '12px', background: 'rgba(48,209,88,0.04)', borderRadius: 12, border: '1px solid rgba(48,209,88,0.15)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: 'white' }}>TV 2: Plata a Platino Élite</span>
+                      <a href="/?tv=2" target="_blank" rel="noreferrer" style={{ fontSize: 11, color: '#60a5fa', textDecoration: 'none' }}>Abrir ↗</a>
+                    </div>
+                    <p style={{ fontSize: 10, color: 'rgba(255,255,255,0.4)', marginBottom: 8 }}>Ideal para la segunda pantalla en configuraciones duales.</p>
+                    <button 
+                      onClick={() => {
+                        navigator.clipboard.writeText(window.location.origin + '/?tv=2');
+                        showToast("Link de TV 2 copiado", "success");
+                      }}
+                      style={{ fontSize: 10, color: 'rgba(255,255,255,0.6)', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', padding: '4px 8px', borderRadius: 6, cursor: 'pointer' }}
+                    >
+                      Copiar Link
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* TV Tips */}
+              <div className="glass-card" style={{ padding: '24px' }}>
+                <h4 style={{ fontSize: 13, fontWeight: 700, color: 'white', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <Info size={14} style={{ color: '#60a5fa' }} /> Consejos para Smart TV
+                </h4>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  {[
+                    { icon: '🔒', title: 'Evitar Suspensión', desc: 'El sistema previene automáticamente que el TV se suspenda usando la Wake Lock API.' },
+                    { icon: '🖥️', title: 'Pantalla Completa', desc: 'Presiona F11 o activa el modo de pantalla completa en el navegador de tu TV.' },
+                    { icon: '🌐', title: 'Navegadores', desc: 'Usa Chrome o Edge para un rendimiento óptimo de las animaciones.' }
+                  ].map((tip, i) => (
+                    <div key={i} style={{ display: 'flex', gap: 8, padding: '10px', background: 'rgba(255,255,255,0.02)', borderRadius: 10, border: '1px solid rgba(255,255,255,0.04)' }}>
+                      <span style={{ fontSize: 14, flexShrink: 0 }}>{tip.icon}</span>
+                      <div>
+                        <div style={{ fontSize: 11, fontWeight: 700, color: 'white', marginBottom: 2 }}>{tip.title}</div>
+                        <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.4)', lineHeight: 1.4 }}>{tip.desc}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+            </div>
+          </div>
+        )}
 
         {/* ==================== TAB: SECURITY ==================== */}
         {activeTab === 'security' && (
@@ -1512,48 +1827,6 @@ const AdminPortal = ({ affiliates, settings, saveAsset, deleteAsset, saveSetting
               </div>
             </div>
 
-            {/* TV Tips card */}
-            <div className="glass-card" style={{ flex: 1, maxWidth: 360, padding: '28px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20, paddingBottom: 16, borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
-                <div style={{ width: 40, height: 40, borderRadius: 12, background: 'rgba(48,209,88,0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <Monitor size={18} style={{ color: '#4ade80' }} />
-                </div>
-                <div>
-                  <h3 style={{ fontSize: 15, fontWeight: 700, color: 'white' }}>Smart TV — Consejos</h3>
-                  <p style={{ fontSize: 12, color: 'rgba(255,255,255,0.40)' }}>Múltiples pantallas y más</p>
-                </div>
-              </div>
-
-              <div style={{ padding: '16px', background: 'rgba(10,132,255,0.08)', borderRadius: 12, border: '1px solid rgba(10,132,255,0.20)', marginBottom: 20 }}>
-                <h4 style={{ fontSize: 13, fontWeight: 700, color: '#60a5fa', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}><Monitor size={14} /> Dividir en 2 TVs</h4>
-                <p style={{ fontSize: 11, color: 'rgba(255,255,255,0.6)', marginBottom: 12 }}>Copia y abre estos links en cada televisor:</p>
-                <div style={{ display: 'flex', gap: 8, flexDirection: 'column' }}>
-                  <a href="/?tv=1" target="_blank" rel="noreferrer" style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', padding: '8px 12px', fontSize: 11, borderRadius: 8, textDecoration: 'none', color: 'white', display: 'flex', justifyContent: 'space-between', transition: 'background 0.2s' }} onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.1)'} onMouseLeave={e => e.currentTarget.style.background = 'rgba(255,255,255,0.05)'}>
-                    <span>TV 1 (Presid. a Bronce Élite)</span><span style={{ color: 'rgba(255,255,255,0.4)' }}>↗</span>
-                  </a>
-                  <a href="/?tv=2" target="_blank" rel="noreferrer" style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', padding: '8px 12px', fontSize: 11, borderRadius: 8, textDecoration: 'none', color: 'white', display: 'flex', justifyContent: 'space-between', transition: 'background 0.2s' }} onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.1)'} onMouseLeave={e => e.currentTarget.style.background = 'rgba(255,255,255,0.05)'}>
-                    <span>TV 2 (Plata a Platino Élite)</span><span style={{ color: 'rgba(255,255,255,0.4)' }}>↗</span>
-                  </a>
-                </div>
-              </div>
-
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                {[
-                  { icon: '🔒', title: 'Wake Lock API', desc: 'El sistema usa la Wake Lock API automáticamente para prevenir que el TV se suspenda. Funciona en Chromium-based browsers.' },
-                  { icon: '⚡', title: 'Interacción periódica', desc: 'Mueve el ratón o remote cada 30 min si el TV lo requiere. Algunos TVs tienen apagado automático independiente del software.' },
-                  { icon: '🖥️', title: 'Modo Kiosco', desc: 'Para presentaciones largas, activa el modo Kiosco en el navegador del TV (F11 o pantalla completa) para evitar barras y notificaciones.' },
-                  { icon: '🌐', title: 'Navegador recomendado', desc: 'Usa Chrome o Edge en el TV. Evita el navegador nativo de Samsung/LG ya que tienen soporte CSS limitado.' },
-                ].map((tip, i) => (
-                  <div key={i} style={{ display: 'flex', gap: 12, padding: '12px', background: 'rgba(255,255,255,0.03)', borderRadius: 12, border: '1px solid rgba(255,255,255,0.05)' }}>
-                    <span style={{ fontSize: 18, flexShrink: 0 }}>{tip.icon}</span>
-                    <div>
-                      <div style={{ fontSize: 12, fontWeight: 700, color: 'white', marginBottom: 3 }}>{tip.title}</div>
-                      <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.45)', lineHeight: 1.5 }}>{tip.desc}</div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
           </div>
         )}
       </div>
@@ -1575,9 +1848,12 @@ const App = () => {
   const [ready, setReady] = useState(false);
 
   // TV Group logic
-  const tvGroup = useMemo(() => {
+  const tvParams = useMemo(() => {
     const params = new URLSearchParams(window.location.search);
-    return params.get('tv');
+    return {
+      group: params.get('tv'),
+      customRanks: params.get('ranks') ? params.get('ranks').split(',').map(r => r.trim().toLowerCase()) : null
+    };
   }, []);
 
   // TV Stay-awake
@@ -1641,8 +1917,18 @@ const App = () => {
     const activeAffiliates = affiliates.filter(a => !a.hidden);
     
     const allowedRanks = RANKS_CONFIG.filter((r, i) => {
-      if (tvGroup === '1') return i <= 3; // Presidencial (0) to Bronce Élite (3)
-      if (tvGroup === '2') return i > 3;  // Plata (4) to Platino Élite (9)
+      if (tvParams.customRanks) {
+        return tvParams.customRanks.includes(r.name.toLowerCase());
+      }
+      if (tvParams.group) {
+        const grp = tvParams.group.toLowerCase().trim();
+        if (finalSettings.customTvs && finalSettings.customTvs[grp]) {
+          const tvRanks = finalSettings.customTvs[grp].map(name => name.toLowerCase());
+          return tvRanks.includes(r.name.toLowerCase());
+        }
+        if (grp === '1') return i <= 3; // Presidencial (0) to Bronce Élite (3)
+        if (grp === '2') return i > 3;  // Plata (4) to Platino Élite (9)
+      }
       return true;
     });
 
@@ -1661,7 +1947,7 @@ const App = () => {
     });
     if (sequence.length === 0) sequence.push({ type: 'empty', duration: 5000, id: 'empty', theme: ["#000000", "#111111", "#000000"] });
     return sequence;
-  }, [affiliates, finalSettings, tvGroup]);
+  }, [affiliates, finalSettings, tvParams]);
 
   useEffect(() => {
     if ((timeline.length <= 1 && timeline[0]?.id === 'empty') || view === 'admin') return;
