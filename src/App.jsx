@@ -1520,7 +1520,20 @@ const AdminPortal = ({ affiliates, settings, saveAsset, deleteAsset, saveSetting
                 </div>
                 <div>
                   <h3 style={{ fontSize: 15, fontWeight: 700, color: 'white' }}>Smart TV — Consejos</h3>
-                  <p style={{ fontSize: 12, color: 'rgba(255,255,255,0.40)' }}>Mantener pantalla activa</p>
+                  <p style={{ fontSize: 12, color: 'rgba(255,255,255,0.40)' }}>Múltiples pantallas y más</p>
+                </div>
+              </div>
+
+              <div style={{ padding: '16px', background: 'rgba(10,132,255,0.08)', borderRadius: 12, border: '1px solid rgba(10,132,255,0.20)', marginBottom: 20 }}>
+                <h4 style={{ fontSize: 13, fontWeight: 700, color: '#60a5fa', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}><Monitor size={14} /> Dividir en 2 TVs</h4>
+                <p style={{ fontSize: 11, color: 'rgba(255,255,255,0.6)', marginBottom: 12 }}>Copia y abre estos links en cada televisor:</p>
+                <div style={{ display: 'flex', gap: 8, flexDirection: 'column' }}>
+                  <a href="/?tv=1" target="_blank" rel="noreferrer" style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', padding: '8px 12px', fontSize: 11, borderRadius: 8, textDecoration: 'none', color: 'white', display: 'flex', justifyContent: 'space-between', transition: 'background 0.2s' }} onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.1)'} onMouseLeave={e => e.currentTarget.style.background = 'rgba(255,255,255,0.05)'}>
+                    <span>TV 1 (Presid. a Bronce Élite)</span><span style={{ color: 'rgba(255,255,255,0.4)' }}>↗</span>
+                  </a>
+                  <a href="/?tv=2" target="_blank" rel="noreferrer" style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', padding: '8px 12px', fontSize: 11, borderRadius: 8, textDecoration: 'none', color: 'white', display: 'flex', justifyContent: 'space-between', transition: 'background 0.2s' }} onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.1)'} onMouseLeave={e => e.currentTarget.style.background = 'rgba(255,255,255,0.05)'}>
+                    <span>TV 2 (Plata a Platino Élite)</span><span style={{ color: 'rgba(255,255,255,0.4)' }}>↗</span>
+                  </a>
                 </div>
               </div>
 
@@ -1560,6 +1573,12 @@ const App = () => {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isAdminAuthenticated, setIsAdminAuthenticated] = useState(false);
   const [ready, setReady] = useState(false);
+
+  // TV Group logic
+  const tvGroup = useMemo(() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.get('tv');
+  }, []);
 
   // TV Stay-awake
   useWakeLock();
@@ -1620,7 +1639,14 @@ const App = () => {
   const timeline = useMemo(() => {
     let sequence = [];
     const activeAffiliates = affiliates.filter(a => !a.hidden);
-    RANKS_CONFIG.forEach(rank => {
+    
+    const allowedRanks = RANKS_CONFIG.filter((r, i) => {
+      if (tvGroup === '1') return i <= 3; // Presidencial (0) to Bronce Élite (3)
+      if (tvGroup === '2') return i > 3;  // Plata (4) to Platino Élite (9)
+      return true;
+    });
+
+    allowedRanks.forEach(rank => {
       const filtered = activeAffiliates.filter(a => a && a.rango === rank.name);
       if (filtered.length === 0) return;
       sequence.push({ type: 'separator', rankName: rank.name, color: rank.color, duration: 4000, id: `sep-${rank.name}`, pin: finalSettings.rankPins[rank.name], theme: rank.theme });
@@ -1635,7 +1661,7 @@ const App = () => {
     });
     if (sequence.length === 0) sequence.push({ type: 'empty', duration: 5000, id: 'empty', theme: ["#000000", "#111111", "#000000"] });
     return sequence;
-  }, [affiliates, finalSettings]);
+  }, [affiliates, finalSettings, tvGroup]);
 
   useEffect(() => {
     if ((timeline.length <= 1 && timeline[0]?.id === 'empty') || view === 'admin') return;
