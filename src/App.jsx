@@ -73,7 +73,26 @@ const normalizeString = (str) => {
 
 const findMatchingRank = (csvRank) => {
   if (!csvRank) return "Presidencial";
-  const normalizedInput = normalizeString(csvRank);
+  let normalizedInput = normalizeString(csvRank);
+  
+  // Traducción y corrección de errores comunes del CSV
+  const aliases = {
+    "presidential": "presidencial",
+    "presidential elite": "presidencial elite",
+    "bronze": "bronce",
+    "bronze elite": "bronce elite",
+    "silver": "plata",
+    "silver elite": "plata elite",
+    "gold": "oro",
+    "gold elite": "oro elite",
+    "platinum": "platino",
+    "platinum elite": "platino elite"
+  };
+  
+  if (aliases[normalizedInput]) {
+    normalizedInput = aliases[normalizedInput];
+  }
+
   const match = RANKS_CONFIG.find(r => normalizeString(r.name) === normalizedInput);
   return match ? match.name : csvRank; // If no match, keep original so it falls into "Sin Rango"
 };
@@ -218,86 +237,133 @@ const ImageWithSkeleton = ({ src, alt, className, containerClassName, placeholde
 // NAME DISPLAY
 // =====================================================
 const NameDisplay = ({ name = "", isSmall = false, maxLines = null }) => {
-  const parts = name.trim().split(/\s+/);
-  let boldPart = "", lightPart = "";
-  if (parts.length >= 4) { boldPart = parts.slice(0, 2).join(' '); lightPart = parts.slice(2).join(' '); }
-  else if (parts.length > 0) { boldPart = parts[0]; lightPart = parts.slice(1).join(' '); }
+    const parts = name.trim().split(/\s+/);
+    let boldPart = "";
+    let lightPart = "";
 
-  const length = name.length;
-  let sizeClass = 'text-[1em] leading-tight';
-  if (length > 45) sizeClass = 'text-[0.45em] leading-[1.1]';
-  else if (length > 35) sizeClass = 'text-[0.55em] leading-[1.1]';
-  else if (length > 28) sizeClass = 'text-[0.65em] leading-[1.1]';
-  else if (length > 22) sizeClass = 'text-[0.75em] leading-[1.1]';
-  else if (length > 18) sizeClass = 'text-[0.9em] leading-[1.1]';
+    if (parts.length >= 4) {
+        boldPart = parts.slice(0, 2).join(' ');
+        lightPart = parts.slice(2).join(' ');
+    } else if (parts.length > 0) {
+        boldPart = parts[0];
+        lightPart = parts.slice(1).join(' ');
+    }
+    
+    const length = name.length;
+    let sizeClass = 'text-[1em] leading-tight';
 
-  return (
-    <div className="flex flex-col w-full" style={maxLines ? { display: '-webkit-box', WebkitLineClamp: maxLines, WebkitBoxOrient: 'vertical', overflow: 'hidden' } : {}}>
-      <span className={`text-white uppercase tracking-tight ${sizeClass}`}>
-        <span style={{ fontWeight: 900 }}>{boldPart}</span>{' '}
-        <span style={{ fontWeight: 300, color: 'rgba(255,255,255,0.88)' }}>{lightPart}</span>
-      </span>
-    </div>
-  );
+    if (length > 45) sizeClass = 'text-[0.45em] leading-[1.1]';
+    else if (length > 35) sizeClass = 'text-[0.55em] leading-[1.1]';
+    else if (length > 28) sizeClass = 'text-[0.65em] leading-[1.1]';
+    else if (length > 22) sizeClass = 'text-[0.75em] leading-[1.1]';
+    else if (length > 18) sizeClass = 'text-[0.9em] leading-[1.1]';
+
+    return (
+        <div 
+            className="flex flex-col w-full"
+            style={maxLines ? {
+                display: '-webkit-box',
+                WebkitLineClamp: maxLines,
+                WebkitBoxOrient: 'vertical',
+                overflow: 'hidden'
+            } : {}}
+        >
+            <span className={`text-white uppercase tracking-tight ${sizeClass} transition-all duration-300`}>
+                <span className="font-black">{boldPart}</span> <span className="font-light text-white/90">{lightPart}</span>
+            </span>
+        </div>
+    );
 };
 
 // =====================================================
 // BACKGROUND EFFECT (TV OPTIMIZED)
 // =====================================================
 const BackgroundEffect = ({ theme = ["#1e3a8a", "#172554", "#0f172a"] }) => {
-  const safeTheme = theme && theme.length >= 3 ? theme : ["#000000", "#000000", "#000000"];
-  return (
-    <div className="absolute inset-0 z-0 overflow-hidden pointer-events-none gpu-layer">
-      <motion.div className="absolute inset-0" animate={{ backgroundColor: safeTheme[2] }} transition={{ duration: 2 }} />
-      <motion.div
-        className="absolute inset-0 gpu-layer"
-        style={{ opacity: 0.6, backgroundSize: "200% 200%" }}
-        animate={{ backgroundImage: `linear-gradient(125deg, ${safeTheme[2]} 0%, ${safeTheme[1]} 40%, ${safeTheme[0]} 70%, ${safeTheme[2]} 100%)` }}
-        transition={{ duration: 2 }}
-      >
-        <motion.div className="w-full h-full" animate={{ backgroundPosition: ["0% 0%", "100% 100%", "0% 0%"] }} transition={{ duration: 15, repeat: Infinity, ease: "linear" }} />
-      </motion.div>
-      <div className="absolute top-[-10%] right-[-10%] w-[80vw] h-[80vh] opacity-40">
-        <svg className="w-full h-full" viewBox="0 0 500 500" preserveAspectRatio="none">
-          <defs><linearGradient id="gradTop" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stopColor={safeTheme[0]} stopOpacity="0.8" /><stop offset="100%" stopColor={safeTheme[1]} stopOpacity="0" /></linearGradient></defs>
-          {[0, 1].map(i => {
-            const d1 = `M${i * 50},0 Q${250 + i * 50},${50 + i * 50} 500,${200 + i * 50}`;
-            const d2 = `M${i * 50},0 Q${250 + i * 50},${150 + i * 50} 500,${200 + i * 50}`;
-            return <motion.path key={i} fill="none" stroke="url(#gradTop)" strokeWidth={3} initial={{ d: d1 }} animate={{ d: [d1, d2, d1] }} transition={{ duration: 10 + i * 2, repeat: Infinity, ease: "easeInOut", delay: i }} className="gpu-layer" />;
-          })}
-        </svg>
-      </div>
-      <div className="absolute bottom-[-10%] left-[-10%] w-[80vw] h-[80vh] opacity-40" style={{ transform: 'rotate(180deg)' }}>
-        <svg className="w-full h-full" viewBox="0 0 500 500" preserveAspectRatio="none">
-          <defs><linearGradient id="gradBottom" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stopColor={safeTheme[0]} stopOpacity="0.8" /><stop offset="100%" stopColor={safeTheme[1]} stopOpacity="0" /></linearGradient></defs>
-          {[0, 1].map(i => {
-            const d1 = `M${i * 50},0 Q${250 + i * 50},${50 + i * 50} 500,${200 + i * 50}`;
-            const d2 = `M${i * 50},0 Q${250 + i * 50},${150 + i * 50} 500,${200 + i * 50}`;
-            return <motion.path key={i} fill="none" stroke="url(#gradBottom)" strokeWidth={3} initial={{ d: d1 }} animate={{ d: [d1, d2, d1] }} transition={{ duration: 12 + i * 2, repeat: Infinity, ease: "easeInOut", delay: i }} className="gpu-layer" />;
-          })}
-        </svg>
-      </div>
-      <div className="absolute inset-0" style={{ background: 'radial-gradient(circle at 50% 50%, transparent 10%, #000000 100%)' }} />
-    </div>
-  );
+    const safeTheme = theme && theme.length >= 3 ? theme : ["#000000", "#000000", "#000000"];
+
+    return (
+        <div className="absolute inset-0 z-0 overflow-hidden pointer-events-none">
+            {/* Fondo sólido base - Barato de renderizar */}
+            <motion.div 
+                className="absolute inset-0 bg-black" 
+                animate={{ backgroundColor: safeTheme[2] }} 
+                transition={{ duration: 2 }} 
+            />
+            
+            <motion.div
+                className="absolute inset-0 opacity-60 gpu-accelerated"
+                animate={{ backgroundImage: `linear-gradient(125deg, ${safeTheme[2]} 0%, ${safeTheme[1]} 40%, ${safeTheme[0]} 70%, ${safeTheme[2]} 100%)` }}
+                transition={{ duration: 2 }}
+                style={{ backgroundSize: "200% 200%" }}
+            >
+                <motion.div className="w-full h-full" animate={{ backgroundPosition: ["0% 0%", "100% 100%", "0% 0%"] }} transition={{ duration: 15, repeat: Infinity, ease: "linear" }} />
+            </motion.div>
+            
+            <div className="absolute top-[-10%] right-[-10%] w-[80vw] h-[80vh] opacity-40">
+                <svg className="w-full h-full" viewBox="0 0 500 500" preserveAspectRatio="none">
+                    <defs><linearGradient id="gradTop" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stopColor={safeTheme[0]} stopOpacity="0.8" /><stop offset="100%" stopColor={safeTheme[1]} stopOpacity="0" /></linearGradient></defs>
+                    {[0, 1].map(i => {
+                        const d1 = `M${i*50},0 Q${250+i*50},${50+i*50} 500,${200+i*50}`;
+                        const d2 = `M${i*50},0 Q${250+i*50},${150+i*50} 500,${200+i*50}`;
+                        return (
+                            <motion.path 
+                                key={i} 
+                                fill="none" 
+                                stroke="url(#gradTop)" 
+                                strokeWidth={3} 
+                                initial={{ d: d1 }}
+                                animate={{ d: [d1, d2, d1] }} 
+                                transition={{ duration: 10 + i * 2, repeat: Infinity, ease: "easeInOut", delay: i }} 
+                                className="gpu-accelerated"
+                            />
+                        );
+                    })}
+                </svg>
+            </div>
+
+            <div className="absolute bottom-[-10%] left-[-10%] w-[80vw] h-[80vh] opacity-40 transform rotate-180">
+                <svg className="w-full h-full" viewBox="0 0 500 500" preserveAspectRatio="none">
+                    <defs><linearGradient id="gradBottom" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stopColor={safeTheme[0]} stopOpacity="0.8" /><stop offset="100%" stopColor={safeTheme[1]} stopOpacity="0" /></linearGradient></defs>
+                    {[0, 1].map(i => {
+                         const d1 = `M${i*50},0 Q${250+i*50},${50+i*50} 500,${200+i*50}`;
+                         const d2 = `M${i*50},0 Q${250+i*50},${150+i*50} 500,${200+i*50}`;
+                        return (
+                            <motion.path 
+                                key={i} 
+                                fill="none" 
+                                stroke="url(#gradBottom)" 
+                                strokeWidth={3} 
+                                initial={{ d: d1 }}
+                                animate={{ d: [d1, d2, d1] }} 
+                                transition={{ duration: 12 + i * 2, repeat: Infinity, ease: "easeInOut", delay: i }}
+                                className="gpu-accelerated" 
+                            />
+                        );
+                    })}
+                </svg>
+            </div>
+
+            <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_50%,_transparent_10%,_#000000_100%)]" />
+        </div>
+    );
 };
 
 // =====================================================
 // SEPARATOR VIEW
 // =====================================================
 const SeparatorView = ({ screen }) => (
-  <div className="w-full h-full flex flex-col items-center justify-center text-center px-10 relative" style={{ zIndex: 20 }}>
-    <motion.div className="relative flex flex-col md:flex-row items-center gap-8 md:gap-16 gpu-layer">
-      {screen.pin && (
-        <motion.div initial={{ x: -100, opacity: 0, rotate: -20 }} animate={{ x: 0, opacity: 1, rotate: 0 }} transition={{ type: "spring", duration: 1.5 }} className="flex-shrink-0">
-          <img src={screen.pin} className="w-32 h-32 md:w-56 md:h-56 object-contain" alt="Rank Pin" />
-        </motion.div>
-      )}
-      <div className="text-center md:text-left">
-        <span style={{ fontSize: '0.875rem', textTransform: 'uppercase', fontWeight: 500, letterSpacing: '0.8em', color: 'rgba(255,255,255,0.5)', display: 'block', marginBottom: '0.5rem' }}>Reconocimiento</span>
-        <h1 style={{ color: screen.color, textShadow: `0 0 40px ${screen.color}40`, fontSize: 'clamp(3rem, 8vw, 6rem)', fontWeight: 900, letterSpacing: '-0.03em', lineHeight: 1, textTransform: 'uppercase' }}>{screen.rankName}</h1>
-        <motion.div initial={{ width: 0 }} animate={{ width: "100%" }} transition={{ delay: 0.5, duration: 1 }} style={{ height: 2, background: 'rgba(255,255,255,0.20)', marginTop: '2rem', width: '100%' }} />
-      </div>
+  <div className="w-full h-full flex flex-col items-center justify-center text-center px-10 relative z-20">
+    <motion.div className="relative flex flex-col md:flex-row items-center gap-8 md:gap-16 gpu-accelerated">
+        {screen.pin && (
+            <motion.div initial={{ x: -100, opacity: 0, rotate: -20 }} animate={{ x: 0, opacity: 1, rotate: 0 }} transition={{ type: "spring", duration: 1.5 }} className="flex-shrink-0">
+                <img src={screen.pin} className="w-32 h-32 md:w-56 md:h-56 object-contain" alt="Rank Pin" />
+            </motion.div>
+        )}
+        <div className="text-center md:text-left">
+            <span className="text-sm md:text-base uppercase font-medium tracking-[0.8em] text-white/50 mb-2 md:mb-4 block">Reconocimiento</span>
+            <h1 style={{ color: screen.color, textShadow: `0 0 40px ${screen.color}40` }} className="text-5xl md:text-7xl lg:text-[6rem] font-black tracking-tight leading-none uppercase">{screen.rankName}</h1>
+            <motion.div initial={{ width: 0 }} animate={{ width: "100%" }} transition={{ delay: 0.5, duration: 1 }} className="h-[2px] bg-white/20 mt-8 w-full" />
+        </div>
     </motion.div>
   </div>
 );
@@ -314,86 +380,114 @@ const AffiliateView = ({ screen, clubPin, rankPins }) => {
 
   useEffect(() => {
     if (isHorizontal && screen.rankConfig.hasQuote) {
-      setContentMode('info');
-      const halfTime = duration / 2;
-      const timer = setTimeout(() => setContentMode('quote'), halfTime);
-      return () => clearTimeout(timer);
-    } else setContentMode('info');
+        setContentMode('info');
+        const halfTime = duration / 2;
+        const timer = setTimeout(() => setContentMode('quote'), halfTime);
+        return () => clearTimeout(timer);
+    } else {
+        setContentMode('info'); 
+    }
   }, [screen, isHorizontal, duration]);
 
-  const imgWidth = isHorizontal ? 330 : 295;
+  const imgWidth = isHorizontal ? 330 : 295; 
   const imgHeight = (imgWidth * 5) / 4;
 
   return (
     <div className={`flex items-center justify-center w-full h-full px-4 md:px-10 ${isVertical ? 'gap-8 md:gap-20' : ''}`}>
-      {items.map((person, idx) => (
-        <motion.div
-          key={person.id}
-          initial={isVertical ? { y: 40, opacity: 0 } : {}}
-          animate={isVertical ? { y: 0, opacity: 1 } : {}}
-          transition={isVertical ? { duration: 0.8, ease: "easeOut", delay: idx * 0.2 } : {}}
-          className={`relative flex items-center gpu-layer ${isHorizontal ? 'flex-col md:flex-row w-full max-w-[970px] h-auto min-h-[495px] p-8 gap-8' : 'flex-col w-full max-w-[390px] h-[600px] p-6'}`}
-          style={{ background: 'rgba(10,10,10,0.90)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '2rem', boxShadow: '0 24px 64px rgba(0,0,0,0.5)' }}
-        >
-          <div className={`relative flex-shrink-0 mx-auto md:mx-0 ${isHorizontal ? '' : 'mb-6'}`} style={{ width: imgWidth, height: imgHeight }}>
-            <div className="absolute inset-0 z-10" style={{ borderRadius: '1.5rem', border: '1px solid rgba(255,255,255,0.10)', boxShadow: 'inset 0 0 0 1px rgba(255,255,255,0.04)' }} />
-            <img
-              src={person.foto || "https://via.placeholder.com/400x500?text=Leader"}
-              alt={person.nombre}
-              className="gpu-layer"
-              style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '1.5rem', boxShadow: '0 16px 48px rgba(0,0,0,0.5)', filter: 'brightness(1.1) contrast(1.1)' }}
-              loading="eager"
-            />
-            {isVertical && person.isPresidentsClub && clubPin && (
-              <div className="absolute" style={{ bottom: -20, right: -20, width: 80, height: 80, zIndex: 30 }}>
-                <img src={clubPin} alt="Club" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
-              </div>
-            )}
-          </div>
-
-          <div className={`flex-1 flex flex-col ${isHorizontal ? 'text-left' : 'text-center w-full'} justify-center`} style={{ zIndex: 10, overflow: 'hidden', minWidth: 0 }}>
-            <AnimatePresence mode="wait">
-              {(contentMode === 'info' || !person.frase) ? (
-                <motion.div key="info" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ duration: 0.5 }} className="w-full">
-                  <div style={{ marginBottom: '0.5rem' }}>
-                    {isHorizontal ? (
-                      <div style={{ marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: 12, minHeight: 70 }}>
-                        {rankPins?.[person.rango] ? (
-                          <img src={rankPins[person.rango]} alt={person.rango} style={{ width: 60, height: 60, objectFit: 'contain' }} />
-                        ) : (
-                          <span style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: '0.3em', color: '#D4AF37', fontWeight: 700 }}>{person.rango}</span>
-                        )}
-                        {person.isPresidentsClub && clubPin && (
-                          <img src={clubPin} alt="President's Club" style={{ width: 60, height: 60, objectFit: 'contain' }} />
-                        )}
-                      </div>
-                    ) : (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12, justifyContent: 'center' }}>
-                        <span style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.3em', color: '#D4AF37', fontWeight: 700 }}>{person.rango}</span>
-                      </div>
-                    )}
-                    <div className={`${isHorizontal ? 'text-4xl md:text-6xl' : (items.length > 1 ? 'text-2xl md:text-3xl' : 'text-3xl md:text-4xl')} mb-1`}>
-                      <NameDisplay name={person.nombre} isSmall={items.length > 1} maxLines={2} />
-                    </div>
+        {items.map((person, idx) => (
+          <motion.div 
+            key={person.id}
+            initial={isVertical ? { y: 40, opacity: 0 } : {}}
+            animate={isVertical ? { y: 0, opacity: 1 } : {}}
+            transition={isVertical ? { duration: 0.8, ease: "easeOut", delay: idx * 0.2 } : {}}
+            className={`
+                relative flex items-center gpu-accelerated
+                bg-[#0a0a0a]/90 border border-white/[0.08]
+                rounded-[2rem] shadow-xl
+                ${isHorizontal 
+                    ? 'flex-col md:flex-row w-full max-w-[970px] h-auto min-h-[495px] p-8 gap-8' 
+                    : 'flex-col w-full max-w-[390px] h-[600px] p-6' 
+                }
+            `}
+          >
+            <div 
+                className={`relative flex-shrink-0 mx-auto md:mx-0 ${isHorizontal ? '' : 'mb-6'}`}
+                style={{ width: imgWidth, height: imgHeight }}
+            >
+              <div className="absolute inset-0 rounded-[1.5rem] border border-white/10 shadow-inner z-10" />
+              <img
+                src={person.foto || "https://via.placeholder.com/400x500?text=Leader"} 
+                alt={person.nombre}
+                className="w-full h-full object-cover rounded-[1.5rem] shadow-lg brightness-110 contrast-110 gpu-accelerated"
+                loading="eager"
+              />
+              {isVertical && person.isPresidentsClub && clubPin && (
+                  <div className="absolute -bottom-5 -right-5 w-20 h-20 z-30 drop-shadow-md animate-in zoom-in duration-700 delay-500">
+                      <img src={clubPin} alt="Club" className="w-full h-full object-contain" />
                   </div>
-                  <div className={`flex items-center gap-4 ${isHorizontal ? 'justify-start' : 'justify-center'}`}>
-                    <div style={{ padding: '4px 12px', borderRadius: 999, border: '1px solid rgba(255,255,255,0.10)', background: 'rgba(255,255,255,0.03)', display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <Globe size={10} style={{ color: 'rgba(255,255,255,0.40)' }} />
-                      <span style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: '0.2em', color: 'rgba(255,255,255,0.60)', fontWeight: 500 }}>{person.pais || "Global"}</span>
-                    </div>
-                  </div>
-                </motion.div>
-              ) : (
-                <motion.div key="quote" initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 1.05 }} transition={{ duration: 0.8 }} className="w-full flex items-center justify-start">
-                  <p style={{ fontSize: 'clamp(1rem, 2vw, 1.25rem)', fontStyle: 'italic', fontFamily: 'Georgia, serif', color: 'rgba(180,180,180,0.9)', lineHeight: 1.6, fontWeight: 300, WebkitLineClamp: 4, display: '-webkit-box', WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
-                    "{person.frase}"
-                  </p>
-                </motion.div>
               )}
-            </AnimatePresence>
-          </div>
-        </motion.div>
-      ))}
+            </div>
+
+            <div className={`flex-1 flex flex-col ${isHorizontal ? 'text-left' : 'text-center w-full'} justify-center z-10 overflow-hidden min-w-0`}>
+               <AnimatePresence mode="wait">
+                  {(contentMode === 'info' || !person.frase) ? (
+                    <motion.div
+                        key="info"
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: -10 }}
+                        transition={{ duration: 0.5 }}
+                        className="w-full"
+                    >
+                        <div className="mb-2">
+                            {isHorizontal ? (
+                                <div className="mb-2 flex items-center gap-3 min-h-[70px]">
+                                    {rankPins?.[person.rango] ? (
+                                        <img src={rankPins[person.rango]} alt={person.rango} className="w-[60px] h-[60px] object-contain" />
+                                    ) : (
+                                        <span className="text-[9px] uppercase tracking-[0.3em] text-[#D4AF37] font-bold">{person.rango}</span>
+                                    )}
+
+                                    {person.isPresidentsClub && clubPin && (
+                                         <img src={clubPin} alt="President's Club" className="w-[60px] h-[60px] object-contain animate-in zoom-in duration-500" />
+                                    )}
+                                </div>
+                            ) : (
+                                <div className="flex items-center gap-3 mb-3 justify-center">
+                                    <span className="text-[10px] uppercase tracking-[0.3em] text-[#D4AF37] font-bold">{person.rango}</span>
+                                </div>
+                            )}
+
+                            <div className={`${isHorizontal ? 'text-4xl md:text-6xl' : (items.length > 1 ? 'text-2xl md:text-3xl' : 'text-3xl md:text-4xl')} mb-1`}>
+                                <NameDisplay name={person.nombre} isSmall={items.length > 1} maxLines={2} />
+                            </div>
+                        </div>
+                        
+                        <div className={`flex items-center gap-4 ${isHorizontal ? 'justify-start' : 'justify-center'}`}>
+                            <div className="px-3 py-1 rounded-full border border-white/10 bg-white/[0.03] flex items-center gap-2">
+                                <Globe size={10} className="text-white/40" />
+                                <span className="text-[9px] uppercase tracking-[0.2em] text-white/60 font-medium">{person.pais || "Global"}</span>
+                            </div>
+                        </div>
+                    </motion.div>
+                  ) : (
+                    <motion.div
+                        key="quote"
+                        initial={{ opacity: 0, scale: 0.95 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        exit={{ opacity: 0, scale: 1.05 }}
+                        transition={{ duration: 0.8 }}
+                        className="w-full flex items-center justify-start"
+                    >
+                         <p className="text-lg md:text-xl italic font-serif text-gray-400 leading-relaxed font-light relative line-clamp-4">
+                            "{person.frase}"
+                         </p>
+                    </motion.div>
+                  )}
+               </AnimatePresence>
+            </div>
+          </motion.div>
+        ))}
     </div>
   );
 };

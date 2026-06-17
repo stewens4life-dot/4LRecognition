@@ -565,7 +565,7 @@ input, select, textarea {
    TV OPTIMIZATIONS
    ======================== */
 
-.gpu-layer {
+.gpu-layer, .gpu-accelerated {
   transform: translateZ(0);
   will-change: transform, opacity;
   backface-visibility: hidden;
