@@ -443,6 +443,7 @@ const AffiliateView = ({ screen, clubPin, rankPins }) => {
                 className="w-full h-full object-cover rounded-[1.5rem] shadow-lg gpu-accelerated"
                 style={{ objectPosition: 'top' }}
                 loading="eager"
+                decoding="sync"
               />
               {isVertical && person.isPresidentsClub && clubPin && (
                 <div className="absolute -bottom-4 -right-4 w-16 h-16 z-30 drop-shadow-md animate-in zoom-in duration-700 delay-500">
@@ -836,6 +837,9 @@ const AdminPortal = ({ affiliates, settings, saveAsset, deleteAsset, saveSetting
   const [formData, setFormData] = useState({ distribuidorId: '', nombre: '', rango: 'Presidencial', pais: '', frase: '', foto: '', isPresidentsClub: false, hidden: false });
   const [editingId, setEditingId] = useState(null);
   const [searchTerm, setSearchTerm] = useState("");
+  const [filterStatus, setFilterStatus] = useState("all");
+  const [filterRank, setFilterRank] = useState("all");
+  const [filterPC, setFilterPC] = useState("all");
   const [uploading, setUploading] = useState(false);
   const [idError, setIdError] = useState("");
   const [expandedRanks, setExpandedRanks] = useState({});
@@ -1087,10 +1091,14 @@ const AdminPortal = ({ affiliates, settings, saveAsset, deleteAsset, saveSetting
   };
 
   const groupedAffiliates = useMemo(() => {
-    const filtered = affiliates.filter(a =>
-      a.nombre?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (a.distribuidorId && a.distribuidorId.includes(searchTerm))
-    );
+    const filtered = affiliates.filter(a => {
+      const matchSearch = a.nombre?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                          (a.distribuidorId && a.distribuidorId.includes(searchTerm));
+      const matchStatus = filterStatus === 'all' ? true : (filterStatus === 'hidden' ? a.hidden : !a.hidden);
+      const matchRank = filterRank === 'all' ? true : a.rango === filterRank;
+      const matchPC = filterPC === 'all' ? true : (filterPC === 'yes' ? a.isPresidentsClub : !a.isPresidentsClub);
+      return matchSearch && matchStatus && matchRank && matchPC;
+    });
     const grouped = {};
     RANKS_CONFIG.forEach(rank => {
       const inRank = filtered.filter(a => a.rango === rank.name);
@@ -1105,7 +1113,7 @@ const AdminPortal = ({ affiliates, settings, saveAsset, deleteAsset, saveSetting
     }
     
     return grouped;
-  }, [affiliates, searchTerm]);
+  }, [affiliates, searchTerm, filterStatus, filterRank, filterPC]);
 
   const totalActive = affiliates.filter(a => !a.hidden).length;
   const totalHidden = affiliates.filter(a => a.hidden).length;
@@ -1288,22 +1296,35 @@ const AdminPortal = ({ affiliates, settings, saveAsset, deleteAsset, saveSetting
             {/* RIGHT: Affiliates list */}
             <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
               {/* Search + actions bar */}
-              <div className="glass-card" style={{ padding: '12px 16px', marginBottom: 12, display: 'flex', gap: 10, alignItems: 'center', flexShrink: 0, borderRadius: 16 }}>
-                <div style={{ position: 'relative', flex: 1 }}>
-                  <Search size={14} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'rgba(255,255,255,0.30)' }} />
-                  <input
-                    value={searchTerm}
-                    onChange={e => setSearchTerm(e.target.value)}
-                    placeholder="Buscar por nombre o ID..."
-                    className="apple-input"
-                    style={{ paddingLeft: 36, fontSize: 13 }}
-                  />
+              <div className="glass-card" style={{ padding: '12px 16px', marginBottom: 12, display: 'flex', flexDirection: 'column', gap: 10, flexShrink: 0, borderRadius: 16 }}>
+                <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                  <div style={{ position: 'relative', flex: 1 }}>
+                    <Search size={14} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'rgba(255,255,255,0.30)' }} />
+                    <input
+                      value={searchTerm}
+                      onChange={e => setSearchTerm(e.target.value)}
+                      placeholder="Buscar por nombre o ID..."
+                      className="apple-input"
+                      style={{ paddingLeft: 36, fontSize: 13 }}
+                    />
+                  </div>
+                  <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.30)' }}>{affiliates.length} líderes totales</span>
                 </div>
-                <div style={{ display: 'flex', gap: 6, flexShrink: 0, alignItems: 'center' }}>
-                  <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.30)', paddingRight: 6 }}>{affiliates.length} líderes</span>
-                  <button onClick={() => setClearAllModal(true)} className="btn-danger" style={{ padding: '8px 14px', borderRadius: 9, fontSize: 11, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 5 }}>
-                    <Trash2 size={11} />Limpiar BD
-                  </button>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} className="apple-input" style={{ flex: 1, fontSize: 12, padding: '6px 12px', minHeight: 'auto' }}>
+                    <option value="all">Visibilidad (Todas)</option>
+                    <option value="visible">Solo Visibles</option>
+                    <option value="hidden">Solo Ocultos</option>
+                  </select>
+                  <select value={filterRank} onChange={e => setFilterRank(e.target.value)} className="apple-input" style={{ flex: 1, fontSize: 12, padding: '6px 12px', minHeight: 'auto' }}>
+                    <option value="all">Rangos (Todos)</option>
+                    {RANKS_CONFIG.map(r => <option key={r.name} value={r.name}>{r.name}</option>)}
+                  </select>
+                  <select value={filterPC} onChange={e => setFilterPC(e.target.value)} className="apple-input" style={{ flex: 1, fontSize: 12, padding: '6px 12px', minHeight: 'auto' }}>
+                    <option value="all">Club (Todos)</option>
+                    <option value="yes">President's Club</option>
+                    <option value="no">Sin Club</option>
+                  </select>
                 </div>
               </div>
 
@@ -1391,6 +1412,7 @@ const AdminPortal = ({ affiliates, settings, saveAsset, deleteAsset, saveSetting
                   </div>
                 )}
               </div>
+
             </div>
           </>
         )}
@@ -1495,6 +1517,17 @@ const AdminPortal = ({ affiliates, settings, saveAsset, deleteAsset, saveSetting
                   <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.60)' }}>Subiendo imagen...</span>
                 </div>
               )}
+
+              {/* Danger Zone */}
+              <div className="glass-card" style={{ padding: '24px', textAlign: 'center', marginTop: 16, border: '1px solid rgba(255,69,58,0.2)' }}>
+                <h3 style={{ fontSize: 14, fontWeight: 700, color: '#ff453a', marginBottom: 4 }}>Base de Datos</h3>
+                <p style={{ fontSize: 12, color: 'rgba(255,255,255,0.40)', marginBottom: 20, lineHeight: 1.5 }}>
+                  Eliminar todos los líderes registrados.
+                </p>
+                <button onClick={() => setClearAllModal(true)} className="btn-danger" style={{ width: '100%', padding: '10px 14px', borderRadius: 10, fontSize: 12, fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+                  <Trash2 size={14} />Limpiar Base de Datos
+                </button>
+              </div>
             </div>
           </div>
         )}
@@ -2008,6 +2041,20 @@ const App = () => {
   return (
     <div className="no-select" style={{ position: 'fixed', inset: 0, background: '#020617', color: 'white', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
       <BackgroundEffect theme={currentScreen.theme || currentScreen.rankConfig?.theme} />
+      
+      {/* Hidden Preloader to keep images decoded in memory */}
+      <div style={{ position: 'absolute', width: 0, height: 0, overflow: 'hidden', opacity: 0, pointerEvents: 'none', zIndex: -1 }}>
+        {timeline.map(slide => {
+          if (slide.type === 'affiliate') {
+            return slide.items.map(p => {
+              if (!p.foto) return null;
+              return <img key={`preload-${p.id}`} src={optimize4LifeImageUrl(p.foto)} alt="" loading="eager" decoding="sync" />;
+            });
+          }
+          return null;
+        })}
+      </div>
+
       <AnimatePresence mode="wait" initial={false}>
         <motion.div
           key={currentScreen.id || currentIndex}
