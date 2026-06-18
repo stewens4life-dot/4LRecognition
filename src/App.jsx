@@ -141,6 +141,20 @@ const uploadToImgBB = async (base64Image, apiKey) => {
   }
 };
 
+const optimize4LifeImageUrl = (url) => {
+  if (!url) return url;
+  // Use only params confirmed supported by the 4Life CDN (same as their own URLs use):
+  // - 4:5 portrait ratio (480x600) to match the card frame
+  // - anchor=topcenter to preserve faces / avoid cutting heads
+  // - scale=both, mode=crop — same as original 4Life URLs
+  // - quality=60 (lighter than their default 75, still looks good on TV)
+  if (url.includes('media2.4life.com')) {
+    const base = url.split('?')[0];
+    return `${base}?w=480&h=600&mode=crop&anchor=topcenter&scale=both&quality=60`;
+  }
+  return url;
+};
+
 // --- TV KEEP-ALIVE: Previene suspensión en Smart TVs ---
 const useWakeLock = () => {
   const wakeLockRef = useRef(null);
@@ -395,11 +409,12 @@ const AffiliateView = ({ screen, clubPin, rankPins }) => {
     }
   }, [screen, isHorizontal, duration]);
 
-  const imgWidth = isHorizontal ? 330 : 295; 
-  const imgHeight = (imgWidth * 5) / 4;
+  // Horizontal: image width 360px -> height 450px. With p-5 (20px), container height 490px perfectly aligns top/bottom padding.
+  const imgWidth = isHorizontal ? 360 : 396;
+  const imgHeight = Math.round(imgWidth * 5 / 4);
 
   return (
-    <div className={`flex items-center justify-center w-full h-full px-4 md:px-10 ${isVertical ? 'gap-8 md:gap-20' : ''}`}>
+    <div className={`flex items-center justify-center w-full h-full px-4 md:px-10 ${isVertical ? 'gap-6 md:gap-14' : ''}`}>
         {items.map((person, idx) => (
           <motion.div 
             key={person.id}
@@ -408,90 +423,91 @@ const AffiliateView = ({ screen, clubPin, rankPins }) => {
             transition={isVertical ? { duration: 0.8, ease: "easeOut", delay: idx * 0.2 } : {}}
             className={`
                 relative flex items-center gpu-accelerated
-                bg-[#0a0a0a]/90 border border-white/[0.08]
-                rounded-[2rem] shadow-xl
-                ${isHorizontal 
-                    ? 'flex-col md:flex-row w-full max-w-[970px] h-auto min-h-[495px] p-8 gap-8' 
-                    : 'flex-col w-full max-w-[390px] h-[600px] p-6' 
+                bg-black/30 border border-white/15
+                rounded-[2rem] shadow-2xl
+                ${isHorizontal
+                    ? 'flex-col md:flex-row w-full max-w-[1050px] h-auto min-h-[490px] p-5 gap-8'
+                    : 'flex-col w-full max-w-[420px] h-auto min-h-[650px] p-3'
                 }
             `}
           >
-            <div 
-                className={`relative flex-shrink-0 mx-auto md:mx-0 ${isHorizontal ? '' : 'mb-6'}`}
-                style={{ width: imgWidth, height: imgHeight }}
+            {/* ---- PHOTO ---- */}
+            <div
+              className={`relative flex-shrink-0 ${isHorizontal ? 'mx-0' : 'mx-auto mb-3'}`}
+              style={{ width: imgWidth, height: imgHeight }}
             >
               <div className="absolute inset-0 rounded-[1.5rem] border border-white/10 shadow-inner z-10" />
               <img
-                src={person.foto || "https://via.placeholder.com/400x500?text=Leader"} 
+                src={optimize4LifeImageUrl(person.foto) || "https://via.placeholder.com/480x600?text=Leader"}
                 alt={person.nombre}
-                className="w-full h-full object-cover rounded-[1.5rem] shadow-lg brightness-110 contrast-110 gpu-accelerated"
+                className="w-full h-full object-cover rounded-[1.5rem] shadow-lg gpu-accelerated"
                 style={{ objectPosition: 'top' }}
                 loading="eager"
               />
               {isVertical && person.isPresidentsClub && clubPin && (
-                  <div className="absolute -bottom-5 -right-5 w-20 h-20 z-30 drop-shadow-md animate-in zoom-in duration-700 delay-500">
-                      <img src={clubPin} alt="Club" className="w-full h-full object-contain" />
-                  </div>
+                <div className="absolute -bottom-4 -right-4 w-16 h-16 z-30 drop-shadow-md animate-in zoom-in duration-700 delay-500">
+                  <img src={clubPin} alt="Club" className="w-full h-full object-contain" />
+                </div>
               )}
             </div>
 
-            <div className={`flex-1 flex flex-col ${isHorizontal ? 'text-left' : 'text-center w-full'} justify-center z-10 overflow-hidden min-w-0`}>
-               <AnimatePresence mode="wait">
-                  {(contentMode === 'info' || !person.frase) ? (
-                    <motion.div
-                        key="info"
-                        initial={{ opacity: 0, y: 10 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, y: -10 }}
-                        transition={{ duration: 0.5 }}
-                        className="w-full"
-                    >
-                        <div className="mb-2">
-                            {isHorizontal ? (
-                                <div className="mb-2 flex items-center gap-3 min-h-[70px]">
-                                    {rankPins?.[person.rango] ? (
-                                        <img src={rankPins[person.rango]} alt={person.rango} className="w-[60px] h-[60px] object-contain" />
-                                    ) : (
-                                        <span className="text-[9px] uppercase tracking-[0.3em] text-[#D4AF37] font-bold">{person.rango}</span>
-                                    )}
-
-                                    {person.isPresidentsClub && clubPin && (
-                                         <img src={clubPin} alt="President's Club" className="w-[60px] h-[60px] object-contain animate-in zoom-in duration-500" />
-                                    )}
-                                </div>
-                            ) : (
-                                <div className="flex items-center gap-3 mb-3 justify-center">
-                                    <span className="text-[10px] uppercase tracking-[0.3em] text-[#D4AF37] font-bold">{person.rango}</span>
-                                </div>
-                            )}
-
-                            <div className={`${isHorizontal ? 'text-4xl md:text-6xl' : (items.length > 1 ? 'text-2xl md:text-3xl' : 'text-3xl md:text-4xl')} mb-1`}>
-                                <NameDisplay name={person.nombre} isSmall={items.length > 1} maxLines={2} />
-                            </div>
+            {/* ---- TEXT ---- */}
+            <div className={`flex-1 flex flex-col ${isHorizontal ? 'text-left' : 'text-center w-full'} justify-center z-10 min-w-0 pb-3`}>
+              <AnimatePresence mode="wait">
+                {(contentMode === 'info' || !person.frase) ? (
+                  <motion.div
+                    key="info"
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -10 }}
+                    transition={{ duration: 0.5 }}
+                    className="w-full"
+                  >
+                    <div className="mb-2">
+                      {isHorizontal ? (
+                        <div className="mb-3 flex items-center gap-3 min-h-[80px]">
+                          {rankPins?.[person.rango] ? (
+                            <img src={rankPins[person.rango]} alt={person.rango} className="w-[72px] h-[72px] object-contain" />
+                          ) : (
+                            <span className="text-[9px] uppercase tracking-[0.3em] text-[#D4AF37] font-bold">{person.rango}</span>
+                          )}
+                          {person.isPresidentsClub && clubPin && (
+                            <img src={clubPin} alt="President's Club" className="w-[72px] h-[72px] object-contain animate-in zoom-in duration-500" />
+                          )}
                         </div>
-                        
-                        <div className={`flex items-center gap-4 ${isHorizontal ? 'justify-start' : 'justify-center'}`}>
-                            <div className="px-3 py-1 rounded-full border border-white/10 bg-white/[0.03] flex items-center gap-2">
-                                <Globe size={10} className="text-white/40" />
-                                <span className="text-[9px] uppercase tracking-[0.2em] text-white/60 font-medium">{person.pais || "Global"}</span>
-                            </div>
+                      ) : (
+                        <div className="flex items-center gap-2 mb-2 justify-center">
+                          <span className="text-[9px] uppercase tracking-[0.3em] text-[#D4AF37] font-bold">{person.rango}</span>
                         </div>
-                    </motion.div>
-                  ) : (
-                    <motion.div
-                        key="quote"
-                        initial={{ opacity: 0, scale: 0.95 }}
-                        animate={{ opacity: 1, scale: 1 }}
-                        exit={{ opacity: 0, scale: 1.05 }}
-                        transition={{ duration: 0.8 }}
-                        className="w-full flex items-center justify-start"
-                    >
-                         <p className="text-lg md:text-xl italic font-serif text-gray-400 leading-relaxed font-light relative line-clamp-4">
-                            "{person.frase}"
-                         </p>
-                    </motion.div>
-                  )}
-               </AnimatePresence>
+                      )}
+
+                      <div className={`${isHorizontal ? 'text-4xl md:text-5xl lg:text-6xl' : (items.length > 1 ? 'text-xl md:text-2xl' : 'text-2xl md:text-3xl')} mb-1`}>
+                        <NameDisplay name={person.nombre} isSmall={items.length > 1} maxLines={2} />
+                      </div>
+                    </div>
+
+                    <div className={`flex items-center gap-4 ${isHorizontal ? 'justify-start' : 'justify-center'}`}>
+                      <div className="px-3 py-1 rounded-full border border-white/10 bg-white/[0.03] flex items-center gap-2">
+                        <Globe size={10} className="text-white/40" />
+                        <span className="text-[9px] uppercase tracking-[0.2em] text-white/60 font-medium">{person.pais || "Global"}</span>
+                      </div>
+                    </div>
+                  </motion.div>
+                ) : (
+                  <motion.div
+                    key="quote"
+                    initial={{ opacity: 0, scale: 0.95 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={{ opacity: 0, scale: 1.05 }}
+                    transition={{ duration: 0.8 }}
+                    className="w-full flex items-center justify-start"
+                  >
+                    <p className="text-lg md:text-xl italic font-serif text-gray-400 leading-relaxed font-light">
+                      "{person.frase}"
+                    </p>
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
           </motion.div>
         ))}
@@ -1936,12 +1952,18 @@ const App = () => {
       const filtered = activeAffiliates.filter(a => a && a.rango === rank.name);
       if (filtered.length === 0) return;
       sequence.push({ type: 'separator', rankName: rank.name, color: rank.color, duration: 4000, id: `sep-${rank.name}`, pin: finalSettings.rankPins[rank.name], theme: rank.theme });
-      const slideDuration = EXTENDED_TIME_RANKS.includes(rank.name) ? 12000 : 8000;
-      if (rank.single) filtered.forEach(aff => sequence.push({ type: 'affiliate', items: [aff], rankConfig: rank, duration: slideDuration, id: `aff-${aff.id}` }));
-      else {
+      if (rank.single) {
+        filtered.forEach(aff => {
+          const baseDuration = EXTENDED_TIME_RANKS.includes(rank.name) ? 12000 : 8000;
+          const finalDuration = baseDuration + (aff.frase ? 2000 : 0);
+          sequence.push({ type: 'affiliate', items: [aff], rankConfig: rank, duration: finalDuration, id: `aff-${aff.id}` });
+        });
+      } else {
         for (let i = 0; i < filtered.length; i += 2) {
           const group = filtered.slice(i, i + 2);
-          sequence.push({ type: 'affiliate', items: group, rankConfig: rank, duration: slideDuration, id: `group-${group.map(p => p.id).join('-')}` });
+          const baseDuration = EXTENDED_TIME_RANKS.includes(rank.name) ? 12000 : 8000;
+          const finalDuration = baseDuration + (group.some(p => p.frase) ? 2000 : 0);
+          sequence.push({ type: 'affiliate', items: group, rankConfig: rank, duration: finalDuration, id: `group-${group.map(p => p.id).join('-')}` });
         }
       }
     });
