@@ -178,9 +178,32 @@ const useWakeLock = () => {
       if (document.visibilityState === 'visible') requestWakeLock();
     };
     document.addEventListener('visibilitychange', handleVisibility);
+
+    // Fallback Anti-Suspensión para Smart TVs (mover un pixel)
+    const antiIdleInterval = setInterval(() => {
+      try {
+        // Simular movimiento del cursor
+        const event = new MouseEvent('mousemove', {
+          view: window,
+          bubbles: true,
+          cancelable: true,
+          clientX: Math.random() * 2,
+          clientY: Math.random() * 2
+        });
+        document.dispatchEvent(event);
+        
+        // Mover scroll un pixel y regresarlo para forzar repaint/actividad
+        window.scrollBy(0, 1);
+        setTimeout(() => window.scrollBy(0, -1), 100);
+      } catch (e) {
+        // Ignorar errores en navegadores antiguos
+      }
+    }, 45000); // Se ejecuta cada 45 segundos
+
     return () => {
       document.removeEventListener('visibilitychange', handleVisibility);
       wakeLockRef.current?.release();
+      clearInterval(antiIdleInterval);
     };
   }, [requestWakeLock]);
 };
