@@ -179,7 +179,24 @@ const useWakeLock = () => {
     };
     document.addEventListener('visibilitychange', handleVisibility);
 
-    // Fallback Anti-Suspensión para Smart TVs (mover un pixel)
+    // Fallback Anti-Suspensión para Smart TVs
+    let ghostPixel = document.getElementById('ghost-pixel');
+    if (!ghostPixel) {
+      ghostPixel = document.createElement('div');
+      ghostPixel.id = 'ghost-pixel';
+      ghostPixel.style.position = 'fixed';
+      ghostPixel.style.bottom = '10px';
+      ghostPixel.style.right = '10px';
+      ghostPixel.style.width = '6px';
+      ghostPixel.style.height = '6px';
+      ghostPixel.style.borderRadius = '50%';
+      ghostPixel.style.backgroundColor = 'rgba(255, 255, 255, 0.2)';
+      ghostPixel.style.zIndex = '9999';
+      ghostPixel.style.pointerEvents = 'none';
+      ghostPixel.style.transition = 'opacity 0.3s, background-color 0.3s';
+      document.body.appendChild(ghostPixel);
+    }
+
     const antiIdleInterval = setInterval(() => {
       try {
         // Simular movimiento del cursor
@@ -195,8 +212,15 @@ const useWakeLock = () => {
         // Mover scroll un pixel y regresarlo para forzar repaint/actividad
         window.scrollBy(0, 1);
         setTimeout(() => window.scrollBy(0, -1), 100);
+
+        // Indicador visual de prueba (puntico que cambia)
+        if (ghostPixel) {
+          const isFaded = ghostPixel.style.opacity === '0.2';
+          ghostPixel.style.opacity = isFaded ? '1' : '0.2';
+          ghostPixel.style.backgroundColor = isFaded ? '#4ade80' : 'rgba(255, 255, 255, 0.2)'; // Cambia a verde
+        }
       } catch (e) {
-        // Ignorar errores en navegadores antiguos
+        // Ignorar errores
       }
     }, 45000); // Se ejecuta cada 45 segundos
 
@@ -204,6 +228,9 @@ const useWakeLock = () => {
       document.removeEventListener('visibilitychange', handleVisibility);
       wakeLockRef.current?.release();
       clearInterval(antiIdleInterval);
+      if (ghostPixel && ghostPixel.parentNode) {
+        ghostPixel.parentNode.removeChild(ghostPixel);
+      }
     };
   }, [requestWakeLock]);
 };
