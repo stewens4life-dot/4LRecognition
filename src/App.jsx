@@ -156,124 +156,68 @@ const optimize4LifeImageUrl = (url) => {
 };
 
 // --- TV KEEP-ALIVE: Previene suspensión en Smart TVs ---
+// Implementación idéntica a IncentivosTV/TVMode.jsx
+
+// Efecto 1: WakeLock API
 const useWakeLock = () => {
-  const wakeLockRef = useRef(null);
-
-  const requestWakeLock = useCallback(async () => {
-    if ('wakeLock' in navigator) {
-      try {
-        wakeLockRef.current = await navigator.wakeLock.request('screen');
-        wakeLockRef.current.addEventListener('release', () => {
-          setTimeout(requestWakeLock, 1000);
-        });
-      } catch (err) {
-        console.warn('WakeLock no disponible:', err);
-      }
-    }
-  }, []);
-
   useEffect(() => {
-    requestWakeLock();
-    const handleVisibility = () => {
-      if (document.visibilityState === 'visible') requestWakeLock();
-    };
-    document.addEventListener('visibilitychange', handleVisibility);
-
-    // 1. Ghost Pixel (Exactamente como en IncentivosTV)
-    let ghostPixel = document.getElementById('ghost-pixel');
-    if (!ghostPixel) {
-      ghostPixel = document.createElement('div');
-      ghostPixel.id = 'ghost-pixel';
-      ghostPixel.className = 'absolute top-0 left-0 w-px h-px pointer-events-none z-[9999]';
-      ghostPixel.style.opacity = '0';
-      document.body.appendChild(ghostPixel);
-    }
-
-    // 2. Indicador Visual (El puntico de prueba solicitado)
-    let testDot = document.getElementById('test-dot');
-    if (!testDot) {
-      testDot = document.createElement('div');
-      testDot.id = 'test-dot';
-      testDot.style.position = 'fixed';
-      testDot.style.bottom = '10px';
-      testDot.style.right = '10px';
-      testDot.style.width = '6px';
-      testDot.style.height = '6px';
-      testDot.style.borderRadius = '50%';
-      testDot.style.backgroundColor = 'rgba(255, 255, 255, 0.2)';
-      testDot.style.zIndex = '9999';
-      testDot.style.pointerEvents = 'none';
-      testDot.style.transition = 'opacity 0.3s, background-color 0.3s';
-      document.body.appendChild(testDot);
-    }
-
-    // 3. Video Invisible en Loop (El método más infalible para el límite de 2 horas en WebOS/Tizen)
-    let dummyVideo = document.getElementById('dummy-video');
-    if (!dummyVideo) {
-      dummyVideo = document.createElement('video');
-      dummyVideo.id = 'dummy-video';
-      dummyVideo.loop = true;
-      dummyVideo.muted = true;
-      dummyVideo.playsInline = true;
-      dummyVideo.style.position = 'absolute';
-      dummyVideo.style.width = '1px';
-      dummyVideo.style.height = '1px';
-      dummyVideo.style.opacity = '0';
-      dummyVideo.style.pointerEvents = 'none';
-      // Video en base64 de 1 segundo en negro, mínimo peso
-      dummyVideo.src = 'data:video/mp4;base64,AAAAHGZ0eXBpc29tAAACAGlzb21pc28yYXZjMQAAAAhmcmVlAAAAG21kYXQAAAGzABAHAAABthAwwgKEAwoIAAAAU21vb3YAAABsbXZoZAAAAADamJb62piW+gAAAXEAAAQAAAEAAAEAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIAAAK0dHJhawAAAFx0a2hkAAAAD9qYlvoAAAAAQQAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAABAAAAAAAEAAAAOAAAAAAABAAAAAAABAAAApm1kaWEAAAAgbWRoZAAAAADamJb62piW+gAAAH0AAAA8VW5kAAAANWhkbHIAAAAAAAAAAHZpZGUAAAAAAAAAAAAAAABWaWRlb0hhbmRsZXIAAAABOG1pbmYAAAAUdm1oZAAAAAEAAAAAAAAAAAAAACRkaW5mAAAAHGRyZWYAAAAAAAAAAQAAAAx1cmwgAAAAAQAAAK5zdGJsAAAArHN0c2QAAAAAAAAAAQAAAJxhdmMxAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAAAEAAAAOABj//wAAABxkZXB0AAAAAQAAAAAAFgAAAAwAAABIAAAAE2NvbHJuY2xjAAEAAQABAAAAMGF2Y0MBQsAN/wAAGgITIFyASyIQARQACvgAARgAAQMwMQAwEAAAAwEAAAMhAAABhGjB0sAAAAAAGHN0dHMAAAAAAAAAAQAAAAEAAAA8AAAAHHN0c2MAAAAAAAAAAQAAAAEAAAABAAAAAQAAABRzdHN6AAAAAAAAACYAAAABAAAAFHN0Y28AAAAAAAAAAQAAAEY=';
-      document.body.appendChild(dummyVideo);
-      dummyVideo.play().catch(() => {});
-    }
-
-    // Phantom activity - previene screensaver moviendo el mouse y opacidad
-    const ghost = () => {
+    let wakeLock = null;
+    const request = async () => {
       try {
-        // Método exacto de IncentivosTV
-        window.dispatchEvent(new MouseEvent('mousemove'));
-        if (ghostPixel) {
-          ghostPixel.style.opacity = ghostPixel.style.opacity === '0' ? '0.01' : '0';
+        if ('wakeLock' in navigator) {
+          wakeLock = await navigator.wakeLock.request('screen');
         }
+      } catch {}
+    };
+    request();
+    const onVisible = () => { if (document.visibilityState === 'visible') request(); };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => { wakeLock?.release(); document.removeEventListener('visibilitychange', onVisible); };
+  }, []);
+};
 
-        // Indicador de prueba (Puntico)
-        if (testDot) {
-          const isFaded = testDot.style.opacity === '0.2';
-          testDot.style.opacity = isFaded ? '1' : '0.2';
-          testDot.style.backgroundColor = isFaded ? '#4ade80' : 'rgba(255, 255, 255, 0.2)';
-        }
-
-        // Asegurar que el video siga reproduciéndose (si la TV lo pausa)
-        if (dummyVideo && dummyVideo.paused) {
-          dummyVideo.play().catch(() => {});
-        }
-      } catch (e) {
-        // Silenciar errores
+// Efecto 2: Phantom activity — previene screensaver (idéntico a IncentivosTV)
+const usePhantomActivity = () => {
+  useEffect(() => {
+    const ghost = () => {
+      window.dispatchEvent(new MouseEvent('mousemove'));
+      const el = document.getElementById('ghost-pixel');
+      if (el) el.style.opacity = el.style.opacity === '0' ? '0.01' : '0';
+      // Indicador visual de prueba: puntico que cambia de color
+      const dot = document.getElementById('test-dot');
+      if (dot) {
+        const isGreen = dot.style.backgroundColor === 'rgb(74, 222, 128)';
+        dot.style.backgroundColor = isGreen ? 'rgba(255,255,255,0.2)' : '#4ade80';
       }
     };
+    const id = setInterval(ghost, 55000);
+    return () => clearInterval(id);
+  }, []);
+};
 
-    // IncentivosTV lo ejecuta cada 55 segundos
-    const antiIdleInterval = setInterval(ghost, 55000);
+// Efecto 3: Heartbeat de red — genera actividad HTTP real cada 25s
+// (IncentivosTV usa Firebase heartbeat cada 28s; aquí usamos fetch a favicon)
+const useNetworkHeartbeat = () => {
+  useEffect(() => {
+    const id = setInterval(() => {
+      try {
+        fetch('/favicon.ico', { cache: 'no-store', mode: 'no-cors' }).catch(() => {});
+      } catch {}
+    }, 25000);
+    return () => clearInterval(id);
+  }, []);
+};
 
-    // Mantenemos la recarga automática diaria a las 3 AM por seguridad (de IncentivosTV)
+// Efecto 4: Auto-recarga diaria a las 3 AM — limpieza de RAM (idéntico a IncentivosTV)
+const useDailyReload = () => {
+  useEffect(() => {
     const now = new Date();
     const target = new Date();
     target.setHours(3, 0, 0, 0);
     if (now.getTime() > target.getTime()) target.setDate(target.getDate() + 1);
-    const reloadTimeoutId = setTimeout(() => window.location.reload(true), target.getTime() - now.getTime());
-
-    return () => {
-      document.removeEventListener('visibilitychange', handleVisibility);
-      wakeLockRef.current?.release();
-      clearInterval(antiIdleInterval);
-      clearTimeout(reloadTimeoutId);
-      if (ghostPixel && ghostPixel.parentNode) ghostPixel.parentNode.removeChild(ghostPixel);
-      if (testDot && testDot.parentNode) testDot.parentNode.removeChild(testDot);
-      if (dummyVideo && dummyVideo.parentNode) {
-        dummyVideo.pause();
-        dummyVideo.parentNode.removeChild(dummyVideo);
-      }
-    };
-  }, [requestWakeLock]);
+    const timeoutId = setTimeout(() => window.location.reload(true), target.getTime() - now.getTime());
+    return () => clearTimeout(timeoutId);
+  }, []);
 };
 
 // --- ANIMATION VARIANTS (TV Optimized) ---
@@ -1996,21 +1940,11 @@ const App = () => {
     };
   }, []);
 
-  // TV Stay-awake
+  // TV Stay-awake — misma arquitectura que IncentivosTV
   useWakeLock();
-
-  // Periodic activity simulation to prevent TV sleep (fallback for TVs without WakeLock support)
-  useEffect(() => {
-    if (view !== 'tv') return;
-    const interval = setInterval(() => {
-      // Create a tiny canvas render to keep GPU active
-      const canvas = document.createElement('canvas');
-      canvas.width = 1; canvas.height = 1;
-      const ctx = canvas.getContext('2d');
-      if (ctx) ctx.clearRect(0, 0, 1, 1);
-    }, 30000);
-    return () => clearInterval(interval);
-  }, [view]);
+  usePhantomActivity();
+  useNetworkHeartbeat();
+  useDailyReload();
 
   useEffect(() => {
     const initAuth = async () => {
@@ -2131,6 +2065,10 @@ const App = () => {
   // TV view
   return (
     <div className="no-select" style={{ position: 'fixed', inset: 0, background: '#020617', color: 'white', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      {/* Ghost pixel — idéntico a IncentivosTV, manipulado por usePhantomActivity */}
+      <div id="ghost-pixel" style={{ position: 'absolute', top: 0, left: 0, width: 1, height: 1, opacity: 0, pointerEvents: 'none', zIndex: 9999 }} />
+      {/* Puntico indicador de prueba (visible, cambia a verde cada 55s) */}
+      <div id="test-dot" style={{ position: 'fixed', bottom: 10, right: 10, width: 6, height: 6, borderRadius: '50%', backgroundColor: 'rgba(255,255,255,0.2)', zIndex: 9999, pointerEvents: 'none', transition: 'background-color 0.4s' }} />
       <BackgroundEffect theme={currentScreen.theme || currentScreen.rankConfig?.theme} />
       
       {/* Hidden Preloader to keep images decoded in memory */}
