@@ -179,57 +179,98 @@ const useWakeLock = () => {
     };
     document.addEventListener('visibilitychange', handleVisibility);
 
-    // Fallback Anti-Suspensión para Smart TVs
+    // 1. Ghost Pixel (Exactamente como en IncentivosTV)
     let ghostPixel = document.getElementById('ghost-pixel');
     if (!ghostPixel) {
       ghostPixel = document.createElement('div');
       ghostPixel.id = 'ghost-pixel';
-      ghostPixel.style.position = 'fixed';
-      ghostPixel.style.bottom = '10px';
-      ghostPixel.style.right = '10px';
-      ghostPixel.style.width = '6px';
-      ghostPixel.style.height = '6px';
-      ghostPixel.style.borderRadius = '50%';
-      ghostPixel.style.backgroundColor = 'rgba(255, 255, 255, 0.2)';
-      ghostPixel.style.zIndex = '9999';
-      ghostPixel.style.pointerEvents = 'none';
-      ghostPixel.style.transition = 'opacity 0.3s, background-color 0.3s';
+      ghostPixel.className = 'absolute top-0 left-0 w-px h-px pointer-events-none z-[9999]';
+      ghostPixel.style.opacity = '0';
       document.body.appendChild(ghostPixel);
     }
 
-    const antiIdleInterval = setInterval(() => {
-      try {
-        // Simular movimiento del cursor
-        const event = new MouseEvent('mousemove', {
-          view: window,
-          bubbles: true,
-          cancelable: true,
-          clientX: Math.random() * 2,
-          clientY: Math.random() * 2
-        });
-        document.dispatchEvent(event);
-        
-        // Mover scroll un pixel y regresarlo para forzar repaint/actividad
-        window.scrollBy(0, 1);
-        setTimeout(() => window.scrollBy(0, -1), 100);
+    // 2. Indicador Visual (El puntico de prueba solicitado)
+    let testDot = document.getElementById('test-dot');
+    if (!testDot) {
+      testDot = document.createElement('div');
+      testDot.id = 'test-dot';
+      testDot.style.position = 'fixed';
+      testDot.style.bottom = '10px';
+      testDot.style.right = '10px';
+      testDot.style.width = '6px';
+      testDot.style.height = '6px';
+      testDot.style.borderRadius = '50%';
+      testDot.style.backgroundColor = 'rgba(255, 255, 255, 0.2)';
+      testDot.style.zIndex = '9999';
+      testDot.style.pointerEvents = 'none';
+      testDot.style.transition = 'opacity 0.3s, background-color 0.3s';
+      document.body.appendChild(testDot);
+    }
 
-        // Indicador visual de prueba (puntico que cambia)
+    // 3. Video Invisible en Loop (El método más infalible para el límite de 2 horas en WebOS/Tizen)
+    let dummyVideo = document.getElementById('dummy-video');
+    if (!dummyVideo) {
+      dummyVideo = document.createElement('video');
+      dummyVideo.id = 'dummy-video';
+      dummyVideo.loop = true;
+      dummyVideo.muted = true;
+      dummyVideo.playsInline = true;
+      dummyVideo.style.position = 'absolute';
+      dummyVideo.style.width = '1px';
+      dummyVideo.style.height = '1px';
+      dummyVideo.style.opacity = '0';
+      dummyVideo.style.pointerEvents = 'none';
+      // Video en base64 de 1 segundo en negro, mínimo peso
+      dummyVideo.src = 'data:video/mp4;base64,AAAAHGZ0eXBpc29tAAACAGlzb21pc28yYXZjMQAAAAhmcmVlAAAAG21kYXQAAAGzABAHAAABthAwwgKEAwoIAAAAU21vb3YAAABsbXZoZAAAAADamJb62piW+gAAAXEAAAQAAAEAAAEAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIAAAK0dHJhawAAAFx0a2hkAAAAD9qYlvoAAAAAQQAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAABAAAAAAAEAAAAOAAAAAAABAAAAAAABAAAApm1kaWEAAAAgbWRoZAAAAADamJb62piW+gAAAH0AAAA8VW5kAAAANWhkbHIAAAAAAAAAAHZpZGUAAAAAAAAAAAAAAABWaWRlb0hhbmRsZXIAAAABOG1pbmYAAAAUdm1oZAAAAAEAAAAAAAAAAAAAACRkaW5mAAAAHGRyZWYAAAAAAAAAAQAAAAx1cmwgAAAAAQAAAK5zdGJsAAAArHN0c2QAAAAAAAAAAQAAAJxhdmMxAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAAAEAAAAOABj//wAAABxkZXB0AAAAAQAAAAAAFgAAAAwAAABIAAAAE2NvbHJuY2xjAAEAAQABAAAAMGF2Y0MBQsAN/wAAGgITIFyASyIQARQACvgAARgAAQMwMQAwEAAAAwEAAAMhAAABhGjB0sAAAAAAGHN0dHMAAAAAAAAAAQAAAAEAAAA8AAAAHHN0c2MAAAAAAAAAAQAAAAEAAAABAAAAAQAAABRzdHN6AAAAAAAAACYAAAABAAAAFHN0Y28AAAAAAAAAAQAAAEY=';
+      document.body.appendChild(dummyVideo);
+      dummyVideo.play().catch(() => {});
+    }
+
+    // Phantom activity - previene screensaver moviendo el mouse y opacidad
+    const ghost = () => {
+      try {
+        // Método exacto de IncentivosTV
+        window.dispatchEvent(new MouseEvent('mousemove'));
         if (ghostPixel) {
-          const isFaded = ghostPixel.style.opacity === '0.2';
-          ghostPixel.style.opacity = isFaded ? '1' : '0.2';
-          ghostPixel.style.backgroundColor = isFaded ? '#4ade80' : 'rgba(255, 255, 255, 0.2)'; // Cambia a verde
+          ghostPixel.style.opacity = ghostPixel.style.opacity === '0' ? '0.01' : '0';
+        }
+
+        // Indicador de prueba (Puntico)
+        if (testDot) {
+          const isFaded = testDot.style.opacity === '0.2';
+          testDot.style.opacity = isFaded ? '1' : '0.2';
+          testDot.style.backgroundColor = isFaded ? '#4ade80' : 'rgba(255, 255, 255, 0.2)';
+        }
+
+        // Asegurar que el video siga reproduciéndose (si la TV lo pausa)
+        if (dummyVideo && dummyVideo.paused) {
+          dummyVideo.play().catch(() => {});
         }
       } catch (e) {
-        // Ignorar errores
+        // Silenciar errores
       }
-    }, 45000); // Se ejecuta cada 45 segundos
+    };
+
+    // IncentivosTV lo ejecuta cada 55 segundos
+    const antiIdleInterval = setInterval(ghost, 55000);
+
+    // Mantenemos la recarga automática diaria a las 3 AM por seguridad (de IncentivosTV)
+    const now = new Date();
+    const target = new Date();
+    target.setHours(3, 0, 0, 0);
+    if (now.getTime() > target.getTime()) target.setDate(target.getDate() + 1);
+    const reloadTimeoutId = setTimeout(() => window.location.reload(true), target.getTime() - now.getTime());
 
     return () => {
       document.removeEventListener('visibilitychange', handleVisibility);
       wakeLockRef.current?.release();
       clearInterval(antiIdleInterval);
-      if (ghostPixel && ghostPixel.parentNode) {
-        ghostPixel.parentNode.removeChild(ghostPixel);
+      clearTimeout(reloadTimeoutId);
+      if (ghostPixel && ghostPixel.parentNode) ghostPixel.parentNode.removeChild(ghostPixel);
+      if (testDot && testDot.parentNode) testDot.parentNode.removeChild(testDot);
+      if (dummyVideo && dummyVideo.parentNode) {
+        dummyVideo.pause();
+        dummyVideo.parentNode.removeChild(dummyVideo);
       }
     };
   }, [requestWakeLock]);
