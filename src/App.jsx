@@ -196,7 +196,6 @@ const usePhantomActivity = () => {
 };
 
 // Efecto 3: Heartbeat de red — genera actividad HTTP real cada 25s
-// (IncentivosTV usa Firebase heartbeat cada 28s; aquí usamos fetch a favicon)
 const useNetworkHeartbeat = () => {
   useEffect(() => {
     const id = setInterval(() => {
@@ -217,6 +216,20 @@ const useDailyReload = () => {
     if (now.getTime() > target.getTime()) target.setDate(target.getDate() + 1);
     const timeoutId = setTimeout(() => window.location.reload(true), target.getTime() - now.getTime());
     return () => clearTimeout(timeoutId);
+  }, []);
+};
+
+// Efecto 5: Video Keep Alive — LA CLAVE para Smart TVs
+// Fuerza la reproducción del video invisible si el navegador lo pausa
+const useVideoKeepAlive = () => {
+  useEffect(() => {
+    const id = setInterval(() => {
+      const video = document.getElementById('keepalive-video');
+      if (video && video.paused) {
+        video.play().catch(() => {});
+      }
+    }, 10000);
+    return () => clearInterval(id);
   }, []);
 };
 
@@ -1945,6 +1958,7 @@ const App = () => {
   usePhantomActivity();
   useNetworkHeartbeat();
   useDailyReload();
+  useVideoKeepAlive();
 
   useEffect(() => {
     const initAuth = async () => {
@@ -2069,6 +2083,8 @@ const App = () => {
       <div id="ghost-pixel" style={{ position: 'absolute', top: 0, left: 0, width: 1, height: 1, opacity: 0, pointerEvents: 'none', zIndex: 9999 }} />
       {/* Puntico indicador de prueba (visible, cambia a verde cada 55s) */}
       <div id="test-dot" style={{ position: 'fixed', bottom: 10, right: 10, width: 6, height: 6, borderRadius: '50%', backgroundColor: 'rgba(255,255,255,0.2)', zIndex: 9999, pointerEvents: 'none', transition: 'background-color 0.4s' }} />
+      {/* Video Invisible en Loop (El método INFALIBLE para el límite de 2 horas en WebOS/Tizen) */}
+      <video id="keepalive-video" src="/keepalive.mp4" autoPlay loop muted playsInline style={{ position: 'absolute', width: 1, height: 1, opacity: 0, pointerEvents: 'none', zIndex: -1 }} />
       <BackgroundEffect theme={currentScreen.theme || currentScreen.rankConfig?.theme} />
       
       {/* Hidden Preloader to keep images decoded in memory */}
