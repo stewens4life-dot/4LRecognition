@@ -6,13 +6,13 @@ import {
   Search, Hash, AlertTriangle, ArrowUpCircle, ChevronDown, ChevronUp, Link, X,
   Image as ImageIcon, Cloud, Save, FileText, AlertCircle, Info, CheckSquare,
   Table, Download, Plus, RefreshCw, Shield, Wifi, WifiOff, Settings,
-  Users, Star, Layers, BarChart2, HelpCircle, Sparkles
+  Users, Star, Layers, BarChart2, HelpCircle, Sparkles, MapPin, Play, SkipForward
 } from 'lucide-react';
 
 // --- FIREBASE IMPORTS ---
 import { initializeApp } from "firebase/app";
 import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "firebase/auth";
-import { getFirestore, collection, doc, setDoc, deleteDoc, onSnapshot, writeBatch } from "firebase/firestore";
+import { getFirestore, collection, doc, setDoc, deleteDoc, onSnapshot, writeBatch, updateDoc } from "firebase/firestore";
 
 // --- FIREBASE SETUP ---
 const firebaseConfig = {
@@ -126,6 +126,79 @@ const compressImage = (file) => {
   });
 };
 
+// --- DEVICE HELPERS (For TV Monitor) ---
+const getDeviceId = () => {
+  try {
+    let id = localStorage.getItem('tv_device_id');
+    if (!id) {
+      id = 'TV-' + Math.random().toString(36).substr(2, 6).toUpperCase();
+      localStorage.setItem('tv_device_id', id);
+    }
+    return id;
+  } catch { return 'TV-' + Math.floor(Math.random() * 99999); }
+};
+
+const getDeviceInfo = () => {
+  try {
+    const ua = navigator.userAgent;
+    let device = 'Desconocido';
+    if (/SmartTV|WebOS|Tizen|NetCast|Viera|BRAVIA/i.test(ua)) device = 'Smart TV';
+    else if (/Android/i.test(ua)) device = 'Android';
+    else if (/iPhone|iPad/i.test(ua)) device = 'iOS';
+    else if (/Windows/i.test(ua)) device = 'Windows PC';
+    else if (/Mac/i.test(ua)) device = 'Mac';
+    else if (/Linux/i.test(ua)) device = 'Linux';
+    let browser = 'Web';
+    if (/Chrome/i.test(ua) && !/Edge|Edg/i.test(ua)) browser = 'Chrome';
+    else if (/Firefox/i.test(ua)) browser = 'Firefox';
+    else if (/Edge|Edg/i.test(ua)) browser = 'Edge';
+    else if (/Safari/i.test(ua) && !/Chrome/i.test(ua)) browser = 'Safari';
+    return `${device} · ${browser}`;
+  } catch { return 'TV Desconocido'; }
+};
+
+const getDeviceLocation = async () => {
+  const apis = [
+    'https://ipwho.is/',
+    'https://ipapi.co/json/',
+    'https://get.geojs.io/v1/ip/geo.json'
+  ];
+
+  for (const api of apis) {
+    try {
+      const res = await fetch(api, { cache: 'no-store', mode: 'cors' });
+      if (!res.ok) continue;
+      const data = await res.json();
+      
+      const city = data.city;
+      const region = data.region || data.region_name || data.regionName;
+      
+      if (city && region) return `${city}, ${region}`;
+      if (data.country || data.country_name) return data.country || data.country_name;
+    } catch {
+      // Intentar siguiente API si hay bloqueo CORS
+    }
+  }
+  return 'Sede Corporativa';
+};
+
+const formatRelativeTime = (isoString) => {
+  if (!isoString) return 'nunca';
+  const diff = Date.now() - new Date(isoString).getTime();
+  const secs = Math.floor(diff / 1000);
+  if (secs < 60) return `hace ${secs}s`;
+  const mins = Math.floor(secs / 60);
+  if (mins < 60) return `hace ${mins}m`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `hace ${hrs}h`;
+  return `hace ${Math.floor(hrs / 24)}d`;
+};
+
+const isDeviceOnline = (lastSeen) => {
+  if (!lastSeen) return false;
+  return (Date.now() - new Date(lastSeen).getTime()) < 45000; // 45s threshold
+};
+
 const uploadToImgBB = async (base64Image, apiKey) => {
   if (!apiKey) return base64Image;
   try {
@@ -155,10 +228,13 @@ const optimize4LifeImageUrl = (url) => {
   return url;
 };
 
-// --- TV KEEP-ALIVE: Previene suspensión en Smart TVs ---
-// Implementación idéntica a IncentivosTV/TVMode.jsx
+// =====================================================================
+// TV KEEP-ALIVE — 4 MECANISMOS IDÉNTICOS A IncentivosTV/TVMode.jsx
+// =====================================================================
 
-// Efecto 1: WakeLock API
+// MECANISMO 1: Wake Lock API
+// Le dice directamente al OS: "no apagues la pantalla, hay una app crítica corriendo"
+// Si la pantalla pierde el foco, vuelve a solicitarlo automáticamente.
 const useWakeLock = () => {
   useEffect(() => {
     let wakeLock = null;
@@ -176,14 +252,16 @@ const useWakeLock = () => {
   }, []);
 };
 
-// Efecto 2: Phantom activity — previene screensaver (idéntico a IncentivosTV)
+// MECANISMO 2: Phantom Activity (Actividad Fantasma)
+// Cada 55s simula movimiento de mouse + alterna opacidad del ghost-pixel
+// Engaña al OS haciéndole creer que hay interacción física → no salta el screensaver
 const usePhantomActivity = () => {
   useEffect(() => {
     const ghost = () => {
       window.dispatchEvent(new MouseEvent('mousemove'));
       const el = document.getElementById('ghost-pixel');
       if (el) el.style.opacity = el.style.opacity === '0' ? '0.01' : '0';
-      // Indicador visual de prueba: puntico que cambia de color
+      // Indicador visual de prueba: puntico que cambia de color cada 55s
       const dot = document.getElementById('test-dot');
       if (dot) {
         const isGreen = dot.style.backgroundColor === 'rgb(74, 222, 128)';
@@ -195,19 +273,27 @@ const usePhantomActivity = () => {
   }, []);
 };
 
-// Efecto 3: Heartbeat de red — genera actividad HTTP real cada 25s
-const useNetworkHeartbeat = () => {
+// MECANISMO 3: Loop de Auto-Recuperación del YouTube Player
+// YouTube pausa videos automáticamente con "¿Sigues ahí?". Este vigilante
+// verifica cada 3s: si detecta estado 2 (pausado) o 5 (detenido), fuerza play.
+// El ref se comparte desde useYouTubeKeepAlive vía window._ytKeepalivePlayer
+const useYTAutoRecovery = () => {
   useEffect(() => {
     const id = setInterval(() => {
       try {
-        fetch('/favicon.ico', { cache: 'no-store', mode: 'no-cors' }).catch(() => {});
+        const player = window._ytKeepalivePlayer;
+        const state = player?.getPlayerState?.();
+        if (state === 2 || state === 5) player.playVideo();
       } catch {}
-    }, 25000);
+    }, 3000); // Exactamente cada 3s, igual que IncentivosTV
     return () => clearInterval(id);
   }, []);
 };
 
-// Efecto 4: Auto-recarga diaria a las 3 AM — limpieza de RAM (idéntico a IncentivosTV)
+// MECANISMO 4: Recarga de Limpieza Diaria a las 3:00 AM
+// Los TVs tienen poca RAM. Después de 24h de video, la memoria se satura → crash.
+// A las 3 AM (hora de baja audiencia) fuerza window.location.reload(true)
+// para vaciar RAM, limpiar caché y rearrancar fresco.
 const useDailyReload = () => {
   useEffect(() => {
     const now = new Date();
@@ -219,18 +305,127 @@ const useDailyReload = () => {
   }, []);
 };
 
-// Efecto 5: Video Keep Alive — LA CLAVE para Smart TVs
-// Fuerza la reproducción del video invisible si el navegador lo pausa
-const useVideoKeepAlive = () => {
+// YOUTUBE KEEP-ALIVE PLAYER
+// Reproduce el video indicado de forma invisible (1x1px, opacity 0)
+// El OS del Smart TV detecta media activa real → NO suspende la pantalla
+// Idéntico al YouTube IFrame que usa IncentivosTV, que es la razón real
+// por la que IncentivosTV nunca se suspende.
+const YT_KEEPALIVE_VIDEO_ID = '5l8khj88MFQ';
+
+const useYouTubeKeepAlive = () => {
+  const ytPlayerRef = useRef(null);
+
   useEffect(() => {
-    const id = setInterval(() => {
-      const video = document.getElementById('keepalive-video');
-      if (video && video.paused) {
-        video.play().catch(() => {});
+    const init = () => {
+      if (ytPlayerRef.current) return;
+      ytPlayerRef.current = new window.YT.Player('yt-keepalive-player', {
+        height: '1', width: '1',
+        videoId: YT_KEEPALIVE_VIDEO_ID,
+        playerVars: {
+          autoplay: 1,
+          mute: 0,          // SIN mute — el audio activo registra media real en el OS
+          controls: 0,
+          rel: 0,
+          loop: 1,
+          playlist: YT_KEEPALIVE_VIDEO_ID,
+          showinfo: 0,
+          modestbranding: 1,
+          playsinline: 1,
+          disablekb: 1,
+          fs: 0,
+          origin: window.location.origin,
+        },
+        events: {
+          onReady: (e) => {
+            try {
+              e.target.setVolume(5); // 5% — casi inaudible, pero cuenta como media activa
+              e.target.playVideo();
+            } catch {}
+          },
+          onStateChange: (e) => {
+            if (e.data === window.YT.PlayerState.PAUSED ||
+                e.data === window.YT.PlayerState.ENDED) {
+              try { e.target.playVideo(); } catch {}
+            }
+          },
+          onError: () => {
+            setTimeout(() => { try { ytPlayerRef.current?.playVideo(); } catch {} }, 5000);
+          },
+        },
+      });
+      // Exponer el player globalmente para que useYTAutoRecovery lo use
+      window._ytKeepalivePlayer = ytPlayerRef.current;
+    };
+
+    if (window.YT && window.YT.Player) {
+      init();
+    } else {
+      const existingScript = document.getElementById('yt-iframe-api');
+      if (!existingScript) {
+        const tag = document.createElement('script');
+        tag.id = 'yt-iframe-api';
+        tag.src = 'https://www.youtube.com/iframe_api';
+        document.body.appendChild(tag);
       }
-    }, 10000);
-    return () => clearInterval(id);
+      const prevReady = window.onYouTubeIframeAPIReady;
+      window.onYouTubeIframeAPIReady = () => {
+        if (prevReady) prevReady();
+        init();
+      };
+    }
+
+    return () => {
+      try { ytPlayerRef.current?.destroy(); } catch {}
+      ytPlayerRef.current = null;
+      window._ytKeepalivePlayer = null;
+    };
   }, []);
+};
+
+// Efecto 6: Heartbeat a Firebase & Escucha de Comandos Remotos
+const useDeviceHeartbeat = (groupConfig) => {
+  const locationRef = useRef('Obteniendo ubicación...');
+
+  useEffect(() => {
+    getDeviceLocation().then(loc => {
+      if (loc) locationRef.current = loc;
+    });
+  }, []);
+
+  useEffect(() => {
+    const deviceId = getDeviceId();
+    const deviceInfo = getDeviceInfo();
+    const deviceRef = doc(db, 'artifacts', appId, 'public', 'data', 'devices', deviceId);
+
+    const sendHeartbeat = () => {
+      setDoc(deviceRef, {
+        lastSeen: new Date().toISOString(),
+        deviceInfo,
+        location: locationRef.current,
+        config: groupConfig || 'Default'
+      }, { merge: true }).catch(() => {});
+    };
+
+    sendHeartbeat();
+    const id = setInterval(sendHeartbeat, 28000); // 28s
+
+    const unsub = onSnapshot(deviceRef, (snap) => {
+      if (!snap.exists()) return;
+      const data = snap.data();
+      if (data.command && data.commandTime) {
+        const age = Date.now() - data.commandTime;
+        if (age < 30000 && data.command === 'REFRESH') {
+          updateDoc(snap.ref, { command: null, commandTime: null });
+          window.location.reload(true);
+        }
+      }
+    });
+
+    return () => {
+      clearInterval(id);
+      unsub();
+    };
+  }, [groupConfig]);
 };
 
 // --- ANIMATION VARIANTS (TV Optimized) ---
@@ -893,6 +1088,15 @@ const AdminPortal = ({ affiliates, settings, saveAsset, deleteAsset, saveSetting
   const [expandedRanks, setExpandedRanks] = useState({});
   const [selectedTvRanks, setSelectedTvRanks] = useState(RANKS_CONFIG.map(r => r.name));
   const [customTvName, setCustomTvName] = useState("");
+  const [devices, setDevices] = useState([]);
+
+  useEffect(() => {
+    if (!isAuthenticated || !user) return;
+    const unsub = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'devices'), (snap) => {
+      setDevices(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    });
+    return () => unsub();
+  }, [isAuthenticated, user]);
 
   const handleSaveCustomTv = async () => {
     if (!customTvName.trim() || selectedTvRanks.length === 0) return;
@@ -915,9 +1119,21 @@ const AdminPortal = ({ affiliates, settings, saveAsset, deleteAsset, saveSetting
     delete updated[nameToDelete];
     try {
       await saveSettings({ customTvs: updated });
-      showToast(`Pantalla "${nameToDelete}" eliminada`, "info");
+      showToast("Pantalla eliminada", "success");
     } catch {
-      showToast("Error al eliminar la pantalla", "error");
+      showToast("Error al eliminar", "error");
+    }
+  };
+
+  const handleRestartTv = async (deviceId) => {
+    try {
+      await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'devices', deviceId), {
+        command: 'REFRESH',
+        commandTime: Date.now()
+      }, { merge: true });
+      showToast('Comando de reinicio enviado', 'success');
+    } catch {
+      showToast('Error al reiniciar', 'error');
     }
   };
 
@@ -1581,7 +1797,7 @@ const AdminPortal = ({ affiliates, settings, saveAsset, deleteAsset, saveSetting
         )}
         {/* ==================== TAB: TVS ==================== */}
         {activeTab === 'tvs' && (
-          <div style={{ flex: 1, display: 'flex', gap: 16, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+          <div className="apple-scroll" style={{ flex: 1, display: 'flex', gap: 16, alignItems: 'flex-start', flexWrap: 'wrap', overflowY: 'auto' }}>
             
             {/* Left side: Custom TV Generator */}
             <div className="glass-card" style={{ flex: 2, minWidth: 400, padding: '28px' }}>
@@ -1774,6 +1990,67 @@ const AdminPortal = ({ affiliates, settings, saveAsset, deleteAsset, saveSetting
                   </div>
                 </div>
               )}
+              {/* Monitoreo de Pantallas */}
+              <div className="glass-card" style={{ padding: '24px', border: '1px solid rgba(74,222,128,0.2)' }}>
+                <h4 style={{ fontSize: 13, fontWeight: 700, color: 'white', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <Monitor size={14} style={{ color: '#4ade80' }} /> Pantallas Conectadas
+                </h4>
+                {devices.length === 0 ? (
+                  <div style={{ padding: '16px', background: 'rgba(255,255,255,0.02)', borderRadius: 12, textAlign: 'center', fontSize: 11, color: 'rgba(255,255,255,0.4)' }}>
+                    No hay pantallas conectadas actualmente.
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                    {devices.map(dev => {
+                      const isOnline = isDeviceOnline(dev.lastSeen);
+                      return (
+                        <div key={dev.id} style={{ padding: '16px', background: isOnline ? 'rgba(74,222,128,0.05)' : 'rgba(255,255,255,0.02)', borderRadius: 16, border: `1px solid ${isOnline ? 'rgba(74,222,128,0.2)' : 'rgba(255,255,255,0.05)'}`, position: 'relative', overflow: 'hidden' }}>
+                          {isOnline && <div style={{ position: 'absolute', top: -20, right: -20, width: 80, height: 80, background: 'rgba(74,222,128,0.1)', borderRadius: '50%', filter: 'blur(20px)', pointerEvents: 'none' }} />}
+                          
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
+                            <div>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                                <div style={{ width: 8, height: 8, borderRadius: '50%', background: isOnline ? '#4ade80' : '#ff453a', boxShadow: isOnline ? '0 0 8px #4ade80' : 'none' }} />
+                                <span style={{ fontSize: 13, fontWeight: 700, color: 'white', fontFamily: 'monospace' }}>{dev.id}</span>
+                              </div>
+                              <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.4)', fontFamily: 'monospace' }}>{dev.deviceInfo}</div>
+                            </div>
+                            <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 10, background: isOnline ? 'rgba(74,222,128,0.1)' : 'rgba(255,255,255,0.1)', color: isOnline ? '#4ade80' : 'rgba(255,255,255,0.4)', border: `1px solid ${isOnline ? 'rgba(74,222,128,0.2)' : 'rgba(255,255,255,0.1)'}` }}>
+                              {isOnline ? 'ONLINE' : 'OFFLINE'}
+                            </span>
+                          </div>
+                          
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 16 }}>
+                            <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.7)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                              <Layers size={12} style={{ color: '#60a5fa' }} /> <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{dev.config}</span>
+                            </div>
+                            {dev.location && (
+                              <div style={{ fontSize: 11, color: '#D4AF37', display: 'flex', alignItems: 'center', gap: 6, background: 'rgba(212,175,55,0.1)', padding: '4px 8px', borderRadius: 6, width: 'fit-content', border: '1px solid rgba(212,175,55,0.2)' }}>
+                                <MapPin size={10} /> <span>{dev.location}</span>
+                              </div>
+                            )}
+                            <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.4)', marginTop: 4 }}>
+                              Última señal: {formatRelativeTime(dev.lastSeen)}
+                            </div>
+                          </div>
+
+                          <div style={{ display: 'flex', gap: 8, borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: 12 }}>
+                            <button 
+                              onClick={() => handleRestartTv(dev.id)}
+                              disabled={!isOnline}
+                              className={isOnline ? 'btn-ghost' : ''}
+                              style={{ flex: 1, padding: '8px', borderRadius: 8, fontSize: 11, fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, border: `1px solid ${isOnline ? 'rgba(255,255,255,0.2)' : 'rgba(255,255,255,0.05)'}`, color: isOnline ? 'white' : 'rgba(255,255,255,0.2)', background: 'transparent', cursor: isOnline ? 'pointer' : 'not-allowed', transition: 'all 0.2s' }}
+                            >
+                              <RefreshCw size={12} /> Recargar
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
               {/* Presets Card */}
               <div className="glass-card" style={{ padding: '24px' }}>
                 <h4 style={{ fontSize: 13, fontWeight: 700, color: 'white', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -1953,12 +2230,13 @@ const App = () => {
     };
   }, []);
 
-  // TV Stay-awake — misma arquitectura que IncentivosTV
-  useWakeLock();
-  usePhantomActivity();
-  useNetworkHeartbeat();
-  useDailyReload();
-  useVideoKeepAlive();
+  // ── Los 4 mecanismos Anti-Suspensión (idénticos a IncentivosTV) ──
+  useWakeLock();           // Mecanismo 1: Wake Lock API
+  usePhantomActivity();    // Mecanismo 2: Actividad Fantasma (ghost-pixel + mousemove)
+  useYTAutoRecovery();     // Mecanismo 3: Loop Auto-Recuperación YouTube (cada 3s, estados 2 y 5)
+  useDailyReload();        // Mecanismo 4: Recarga RAM a las 3:00 AM
+  useYouTubeKeepAlive();   // Player YouTube invisible con audio — señal de media activa al OS
+  useDeviceHeartbeat(`Group: ${tvParams.group || 'All'} | Ranks: ${tvParams.customRanks ? tvParams.customRanks.join(',') : 'All'}`);
 
   useEffect(() => {
     const initAuth = async () => {
@@ -2083,8 +2361,9 @@ const App = () => {
       <div id="ghost-pixel" style={{ position: 'absolute', top: 0, left: 0, width: 1, height: 1, opacity: 0, pointerEvents: 'none', zIndex: 9999 }} />
       {/* Puntico indicador de prueba (visible, cambia a verde cada 55s) */}
       <div id="test-dot" style={{ position: 'fixed', bottom: 10, right: 10, width: 6, height: 6, borderRadius: '50%', backgroundColor: 'rgba(255,255,255,0.2)', zIndex: 9999, pointerEvents: 'none', transition: 'background-color 0.4s' }} />
-      {/* Video Invisible en Loop (El método INFALIBLE para el límite de 2 horas en WebOS/Tizen) */}
-      <video id="keepalive-video" src="/keepalive.mp4" autoPlay loop muted playsInline style={{ position: 'absolute', width: 1, height: 1, opacity: 0, pointerEvents: 'none', zIndex: -1 }} />
+      {/* YouTube Keep Alive — IDÉNTICO a IncentivosTV: reproduce audio en bucle invisible */}
+      {/* El OS del Smart TV detecta media activa real y NO suspende la pantalla */}
+      <div id="yt-keepalive-player" style={{ position: 'absolute', width: 1, height: 1, opacity: 0, pointerEvents: 'none', zIndex: -1, overflow: 'hidden' }} />
       <BackgroundEffect theme={currentScreen.theme || currentScreen.rankConfig?.theme} />
       
       {/* Hidden Preloader to keep images decoded in memory */}
