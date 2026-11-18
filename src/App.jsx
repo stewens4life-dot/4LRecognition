@@ -311,12 +311,28 @@ const useDailyReload = () => {
 // El OS del Smart TV detecta media activa real → NO suspende la pantalla
 // Idéntico al YouTube IFrame que usa IncentivosTV, que es la razón real
 // por la que IncentivosTV nunca se suspende.
-const YT_KEEPALIVE_VIDEO_ID = '5l8khj88MFQ';
+const YT_KEEPALIVE_VIDEO_ID = 'sF80I-TQiW0';
 
 const useYouTubeKeepAlive = () => {
   const ytPlayerRef = useRef(null);
 
   useEffect(() => {
+    let unmuteInterval = null;
+
+    const tryUnmute = () => {
+      try {
+        const p = window._ytKeepalivePlayer;
+        if (!p) return;
+        p.unMute();
+        p.setVolume(15);
+        // Verificar si realmente se desmuteó
+        if (p.isMuted && !p.isMuted()) {
+          // Éxito — dejar de intentar
+          if (unmuteInterval) { clearInterval(unmuteInterval); unmuteInterval = null; }
+        }
+      } catch {}
+    };
+
     const init = () => {
       if (ytPlayerRef.current) return;
       ytPlayerRef.current = new window.YT.Player('yt-keepalive-player', {
@@ -324,7 +340,7 @@ const useYouTubeKeepAlive = () => {
         videoId: YT_KEEPALIVE_VIDEO_ID,
         playerVars: {
           autoplay: 1,
-          mute: 1, // Muted initially to bypass browser autoplay restrictions
+          mute: 1, // Muted para garantizar autoplay, luego se desmutea agresivamente
           controls: 0,
           rel: 0,
           loop: 1,
@@ -340,12 +356,15 @@ const useYouTubeKeepAlive = () => {
           onReady: (e) => {
             try {
               e.target.playVideo();
-              setTimeout(() => { try { e.target.unMute(); e.target.setVolume(25); } catch {} }, 500);
+              // Intentos escalonados de desmuteo
+              setTimeout(() => tryUnmute(), 500);
+              setTimeout(() => tryUnmute(), 1500);
+              setTimeout(() => tryUnmute(), 3000);
             } catch {}
           },
           onStateChange: (e) => {
             if (e.data === window.YT.PlayerState.PLAYING) {
-              try { e.target.unMute(); e.target.setVolume(25); } catch {}
+              tryUnmute();
             }
             if (e.data === window.YT.PlayerState.PAUSED ||
                 e.data === window.YT.PlayerState.ENDED) {
@@ -358,6 +377,11 @@ const useYouTubeKeepAlive = () => {
         },
       });
       window._ytKeepalivePlayer = ytPlayerRef.current;
+
+      // Loop agresivo: intentar desmutear cada 5s hasta lograrlo
+      // En Smart TVs (WebOS/Tizen) esto funciona de inmediato.
+      // En Chrome desktop solo funciona después de una interacción.
+      unmuteInterval = setInterval(tryUnmute, 5000);
     };
 
     if (!window.YT) {
@@ -373,27 +397,25 @@ const useYouTubeKeepAlive = () => {
       window.onYouTubeIframeAPIReady = () => { if (prev) prev(); init(); };
     }
 
-    // Desmuteo automático invisible — sin botón visible, sin UI
-    // Al primer clic/tap/tecla en la pantalla, se activa el audio silenciosamente.
-    // En Smart TVs, esto se dispara con el control remoto (OK / directional).
+    // Desmuteo en cualquier interacción (clic, toque, tecla, scroll)
     const handleInteraction = () => {
-      try {
-        if (window._ytKeepalivePlayer) {
-          window._ytKeepalivePlayer.unMute();
-          window._ytKeepalivePlayer.setVolume(25);
-          window._ytKeepalivePlayer.playVideo();
-        }
-      } catch {}
+      tryUnmute();
+      try { window._ytKeepalivePlayer?.playVideo(); } catch {}
     };
 
     window.addEventListener('click', handleInteraction);
     window.addEventListener('touchstart', handleInteraction);
-    window.addEventListener('keydown', handleInteraction, { once: true });
+    window.addEventListener('keydown', handleInteraction);
+    window.addEventListener('scroll', handleInteraction, { once: true });
+    window.addEventListener('mousemove', handleInteraction, { once: true });
 
     return () => {
+      if (unmuteInterval) clearInterval(unmuteInterval);
       window.removeEventListener('click', handleInteraction);
       window.removeEventListener('touchstart', handleInteraction);
       window.removeEventListener('keydown', handleInteraction);
+      window.removeEventListener('scroll', handleInteraction);
+      window.removeEventListener('mousemove', handleInteraction);
       try { ytPlayerRef.current?.destroy(); } catch {}
       ytPlayerRef.current = null;
       window._ytKeepalivePlayer = null;
