@@ -276,15 +276,22 @@ const usePhantomActivity = () => {
 
 // MECANISMO 3: Loop de Auto-Recuperación del YouTube Player
 // YouTube pausa videos automáticamente con "¿Sigues ahí?". Este vigilante
-// verifica cada 3s: si detecta estado 2 (pausado) o 5 (detenido), fuerza play.
+// verifica cada 3s: si detecta estado 2 (pausado), 5 (detenido), -1 (no iniciado) o 0 (terminado), fuerza play.
 // El ref se comparte desde useYouTubeKeepAlive vía window._ytKeepalivePlayer
 const useYTAutoRecovery = () => {
   useEffect(() => {
     const id = setInterval(() => {
       try {
         const player = window._ytKeepalivePlayer;
-        const state = player?.getPlayerState?.();
-        if (state === 2 || state === 5) player.playVideo();
+        if (!player) return;
+        const state = player.getPlayerState?.();
+        if (state === 2 || state === 5 || state === -1 || state === 0) {
+          player.playVideo();
+        }
+        if (typeof player.isMuted === 'function' && player.isMuted()) {
+          player.unMute();
+          player.setVolume(15);
+        }
       } catch {}
     }, 3000); // Exactamente cada 3s, igual que IncentivosTV
     return () => clearInterval(id);
@@ -326,7 +333,7 @@ const useYouTubeKeepAlive = () => {
         p.unMute();
         p.setVolume(15);
         // Verificar si realmente se desmuteó
-        if (p.isMuted && !p.isMuted()) {
+        if (typeof p.isMuted === 'function' && !p.isMuted()) {
           // Éxito — dejar de intentar
           if (unmuteInterval) { clearInterval(unmuteInterval); unmuteInterval = null; }
         }
@@ -335,12 +342,17 @@ const useYouTubeKeepAlive = () => {
 
     const init = () => {
       if (ytPlayerRef.current) return;
+      const container = document.getElementById('yt-keepalive-player');
+      if (!container) {
+        setTimeout(init, 150);
+        return;
+      }
       ytPlayerRef.current = new window.YT.Player('yt-keepalive-player', {
         height: '100%', width: '100%',
         videoId: YT_KEEPALIVE_VIDEO_ID,
         playerVars: {
           autoplay: 1,
-          mute: 1, // Muted para garantizar autoplay, luego se desmutea agresivamente
+          mute: 0, // Iniciar directamente con sonido (idéntico a IncentivosTV)
           controls: 0,
           rel: 0,
           loop: 1,
@@ -350,17 +362,34 @@ const useYouTubeKeepAlive = () => {
           playsinline: 1,
           disablekb: 1,
           fs: 0,
+          enablejsapi: 1,
           origin: window.location.origin,
         },
         events: {
           onReady: (e) => {
             try {
+              e.target.setVolume(15);
+              e.target.unMute();
               e.target.playVideo();
-              // Intentos escalonados de desmuteo
-              setTimeout(() => tryUnmute(), 500);
-              setTimeout(() => tryUnmute(), 1500);
-              setTimeout(() => tryUnmute(), 3000);
             } catch {}
+
+            // Si el navegador bloqueó autoplay unmuted, arrancar muted y desmutear de inmediato
+            setTimeout(() => {
+              try {
+                const state = e.target.getPlayerState?.();
+                if (state !== window.YT.PlayerState.PLAYING) {
+                  e.target.mute();
+                  e.target.playVideo();
+                  setTimeout(() => tryUnmute(), 500);
+                }
+              } catch {}
+            }, 800);
+
+            // Intentos escalonados de desmuteo si el navegador requirió inicio diferido
+            setTimeout(() => tryUnmute(), 300);
+            setTimeout(() => tryUnmute(), 1200);
+            setTimeout(() => tryUnmute(), 2500);
+            setTimeout(() => tryUnmute(), 5000);
           },
           onStateChange: (e) => {
             if (e.data === window.YT.PlayerState.PLAYING) {
@@ -371,17 +400,16 @@ const useYouTubeKeepAlive = () => {
               try { e.target.playVideo(); } catch {}
             }
           },
-          onError: () => {
-            setTimeout(() => { try { ytPlayerRef.current?.playVideo(); } catch {} }, 5000);
+          onError: (err) => {
+            console.warn('YouTube KeepAlive error:', err);
+            setTimeout(() => { try { ytPlayerRef.current?.playVideo(); } catch {} }, 4000);
           },
         },
       });
       window._ytKeepalivePlayer = ytPlayerRef.current;
 
-      // Loop agresivo: intentar desmutear cada 5s hasta lograrlo
-      // En Smart TVs (WebOS/Tizen) esto funciona de inmediato.
-      // En Chrome desktop solo funciona después de una interacción.
-      unmuteInterval = setInterval(tryUnmute, 5000);
+      // Loop de verificación y desmuteo
+      unmuteInterval = setInterval(tryUnmute, 3000);
     };
 
     if (!window.YT) {
@@ -397,25 +425,30 @@ const useYouTubeKeepAlive = () => {
       window.onYouTubeIframeAPIReady = () => { if (prev) prev(); init(); };
     }
 
-    // Desmuteo en cualquier interacción (clic, toque, tecla, scroll)
+    // Desmuteo inmediato en cualquier interacción física (clic, toque, tecla)
     const handleInteraction = () => {
       tryUnmute();
-      try { window._ytKeepalivePlayer?.playVideo(); } catch {}
+      try { 
+        const p = window._ytKeepalivePlayer;
+        if (p) {
+          p.unMute();
+          p.setVolume(15);
+          p.playVideo();
+        }
+      } catch {}
     };
 
     window.addEventListener('click', handleInteraction);
-    window.addEventListener('touchstart', handleInteraction);
+    window.addEventListener('touchstart', handleInteraction, { passive: true });
+    window.addEventListener('pointerdown', handleInteraction, { passive: true });
     window.addEventListener('keydown', handleInteraction);
-    window.addEventListener('scroll', handleInteraction, { once: true });
-    window.addEventListener('mousemove', handleInteraction, { once: true });
 
     return () => {
       if (unmuteInterval) clearInterval(unmuteInterval);
       window.removeEventListener('click', handleInteraction);
       window.removeEventListener('touchstart', handleInteraction);
+      window.removeEventListener('pointerdown', handleInteraction);
       window.removeEventListener('keydown', handleInteraction);
-      window.removeEventListener('scroll', handleInteraction);
-      window.removeEventListener('mousemove', handleInteraction);
       try { ytPlayerRef.current?.destroy(); } catch {}
       ytPlayerRef.current = null;
       window._ytKeepalivePlayer = null;
@@ -538,7 +571,11 @@ const useDeviceHeartbeat = (heartbeatData, currentView) => {
           } else if (data.command === 'NAVIGATE_URL' && data.commandPayload) {
             window.location.href = data.commandPayload;
           } else if (data.command === 'FORCE_PLAY') {
-            try { window._ytKeepalivePlayer?.playVideo?.(); } catch {}
+            try { 
+              window._ytKeepalivePlayer?.playVideo?.();
+              window._ytKeepalivePlayer?.unMute?.();
+              window._ytKeepalivePlayer?.setVolume?.(15);
+            } catch {}
           }
         }
       }
@@ -662,7 +699,7 @@ const BackgroundEffect = ({ theme = ["#1e3a8a", "#172554", "#0f172a"] }) => {
     const safeTheme = theme && theme.length >= 3 ? theme : ["#000000", "#000000", "#000000"];
 
     return (
-        <div className="absolute inset-0 z-0 overflow-hidden pointer-events-none">
+        <div className="absolute inset-0 z-[1] overflow-hidden pointer-events-none">
             {/* Fondo sólido base - Barato de renderizar */}
             <motion.div 
                 className="absolute inset-0 bg-black" 
@@ -2509,7 +2546,7 @@ const App = () => {
   useYTAutoRecovery();     // Mecanismo 3: Loop Auto-Recuperación YouTube (cada 3s, estados 2 y 5)
   useDailyReload();        // Mecanismo 4: Recarga RAM a las 3:00 AM
   useYouTubeKeepAlive();   // Player YouTube invisible con audio — señal de media activa al OS
-  useSilentAudioKeepAlive(); // Mecanismo 5: Audio WAV silencioso en loop — 100% offline, imposible de bloquear
+  // useSilentAudioKeepAlive(); // Desactivado para evitar conflicto de foco de audio con YouTube
 
   useEffect(() => {
     const initAuth = async () => {
@@ -2617,91 +2654,88 @@ const App = () => {
     }
   }, view);
 
-  // Loading
-  if (!ready) return (
-    <div style={{ position: 'fixed', inset: 0, background: '#000', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16, fontFamily: 'Inter, sans-serif' }}>
-      <div style={{ width: 60, height: 60, background: 'linear-gradient(135deg, rgba(212,175,55,0.20), rgba(212,175,55,0.05))', borderRadius: 18, display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid rgba(212,175,55,0.20)' }}>
-        <Sparkles size={28} style={{ color: '#D4AF37' }} />
-      </div>
-      <p style={{ fontSize: 14, color: 'rgba(255,255,255,0.40)', letterSpacing: '0.05em' }}>Cargando...</p>
-    </div>
-  );
-
-  // Admin view
-  if (view === 'admin') return (
-    <AdminPortal
-      affiliates={affiliates}
-      settings={finalSettings}
-      saveAsset={saveAsset}
-      deleteAsset={deleteAsset}
-      saveSettings={saveSettings}
-      onClose={() => setView('tv')}
-      isAuthenticated={isAdminAuthenticated}
-      setIsAuthenticated={setIsAdminAuthenticated}
-      user={user}
-    />
-  );
-
-  // TV view
   return (
-    <div className="no-select" style={{ position: 'fixed', inset: 0, background: '#020617', color: 'white', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-      {/* Ghost pixel — idéntico a IncentivosTV, manipulado por usePhantomActivity */}
+    <>
+      {/* YouTube Keep Alive — SIEMPRE presente en el DOM desde el inicio para que la API nunca falle */}
+      <div id="yt-keepalive-player" style={{ position: 'fixed', inset: 0, width: '100%', height: '100%', opacity: 0.02, pointerEvents: 'none', zIndex: 0, overflow: 'hidden' }} />
+      {/* Ghost pixel — manipulado por usePhantomActivity */}
       <div id="ghost-pixel" style={{ position: 'absolute', top: 0, left: 0, width: 1, height: 1, opacity: 0, pointerEvents: 'none', zIndex: 9999 }} />
       {/* Puntico indicador de prueba (visible, cambia a verde cada 55s) */}
       <div id="test-dot" style={{ position: 'fixed', bottom: 10, right: 10, width: 6, height: 6, borderRadius: '50%', backgroundColor: 'rgba(255,255,255,0.2)', zIndex: 9999, pointerEvents: 'none', transition: 'background-color 0.4s' }} />
-      {/* YouTube Keep Alive — IDÉNTICO a IncentivosTV: reproduce audio en bucle invisible */}
-      {/* El OS del Smart TV detecta media activa real y NO suspende la pantalla */}
-      <div id="yt-keepalive-player" style={{ position: 'absolute', width: '100%', height: '100%', opacity: 0.01, pointerEvents: 'none', zIndex: -1, overflow: 'hidden' }} />
-      <BackgroundEffect theme={currentScreen.theme || currentScreen.rankConfig?.theme} />
-      
-      {/* Hidden Preloader to keep images decoded in memory */}
-      <div style={{ position: 'absolute', width: 0, height: 0, overflow: 'hidden', opacity: 0, pointerEvents: 'none', zIndex: -1 }}>
-        {timeline.map(slide => {
-          if (slide.type === 'affiliate') {
-            return slide.items.map(p => {
-              if (!p.foto) return null;
-              return <img key={`preload-${p.id}`} src={optimize4LifeImageUrl(p.foto)} alt="" loading="eager" decoding="sync" />;
-            });
-          }
-          return null;
-        })}
-      </div>
 
-      <AnimatePresence mode="wait" initial={false}>
-        <motion.div
-          key={currentScreen.id || currentIndex}
-          variants={getVariants(currentScreen)}
-          initial="enter"
-          animate="center"
-          exit="exit"
-          transition={{ duration: 1.2, ease: [0.16, 1, 0.3, 1] }}
-          className="gpu-layer"
-          style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 10, width: '100%', height: '100%' }}
-        >
-          {currentScreen?.type === 'separator' ? (
-            <SeparatorView screen={currentScreen} />
-          ) : currentScreen?.type === 'empty' ? (
-            <div style={{ textAlign: 'center', color: 'rgba(255,255,255,0.30)' }}>
-              <Monitor size={48} style={{ margin: '0 auto 16px', color: 'rgba(255,255,255,0.10)' }} />
-              <p style={{ fontSize: 20, fontWeight: 300, textTransform: 'uppercase', letterSpacing: '0.2em' }}>Esperando datos...</p>
-              <p style={{ fontSize: 13, marginTop: 8, color: 'rgba(255,255,255,0.20)' }}>Agrega líderes desde el panel de administración</p>
-            </div>
-          ) : (
-            <AffiliateView screen={currentScreen} clubPin={finalSettings.presidentsClubPin} rankPins={finalSettings.rankPins} />
-          )}
-        </motion.div>
-      </AnimatePresence>
+      {!ready ? (
+        <div style={{ position: 'fixed', inset: 0, background: '#000', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16, fontFamily: 'Inter, sans-serif', zIndex: 100 }}>
+          <div style={{ width: 60, height: 60, background: 'linear-gradient(135deg, rgba(212,175,55,0.20), rgba(212,175,55,0.05))', borderRadius: 18, display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid rgba(212,175,55,0.20)' }}>
+            <Sparkles size={28} style={{ color: '#D4AF37' }} />
+          </div>
+          <p style={{ fontSize: 14, color: 'rgba(255,255,255,0.40)', letterSpacing: '0.05em' }}>Cargando...</p>
+        </div>
+      ) : view === 'admin' ? (
+        <AdminPortal
+          affiliates={affiliates}
+          settings={finalSettings}
+          saveAsset={saveAsset}
+          deleteAsset={deleteAsset}
+          saveSettings={saveSettings}
+          onClose={() => setView('tv')}
+          isAuthenticated={isAdminAuthenticated}
+          setIsAuthenticated={setIsAdminAuthenticated}
+          user={user}
+        />
+      ) : (
+        <div className="no-select" style={{ position: 'fixed', inset: 0, background: '#020617', color: 'white', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <BackgroundEffect theme={currentScreen.theme || currentScreen.rankConfig?.theme} />
+          
+          {/* Hidden Preloader to keep images decoded in memory */}
+          <div style={{ position: 'absolute', width: 0, height: 0, overflow: 'hidden', opacity: 0, pointerEvents: 'none', zIndex: -1 }}>
+            {timeline.map(slide => {
+              if (slide.type === 'affiliate') {
+                return slide.items.map(p => {
+                  if (!p.foto) return null;
+                  return <img key={`preload-${p.id}`} src={optimize4LifeImageUrl(p.foto)} alt="" loading="eager" decoding="sync" />;
+                });
+              }
+              return null;
+            })}
+          </div>
 
-      {/* Hidden admin button */}
-      <button
-        onClick={() => setView('admin')}
-        style={{ position: 'absolute', bottom: 20, right: 20, zIndex: 150, padding: 12, opacity: 0.08, transition: 'opacity 0.5s ease', cursor: 'pointer', borderRadius: 10, background: 'rgba(255,255,255,0.05)' }}
-        onMouseEnter={e => e.currentTarget.style.opacity = '1'}
-        onMouseLeave={e => e.currentTarget.style.opacity = '0.08'}
-      >
-        <Lock size={16} style={{ color: 'white' }} />
-      </button>
-    </div>
+          <AnimatePresence mode="wait" initial={false}>
+            <motion.div
+              key={currentScreen.id || currentIndex}
+              variants={getVariants(currentScreen)}
+              initial="enter"
+              animate="center"
+              exit="exit"
+              transition={{ duration: 1.2, ease: [0.16, 1, 0.3, 1] }}
+              className="gpu-layer"
+              style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 10, width: '100%', height: '100%' }}
+            >
+              {currentScreen?.type === 'separator' ? (
+                <SeparatorView screen={currentScreen} />
+              ) : currentScreen?.type === 'empty' ? (
+                <div style={{ textAlign: 'center', color: 'rgba(255,255,255,0.30)' }}>
+                  <Monitor size={48} style={{ margin: '0 auto 16px', color: 'rgba(255,255,255,0.10)' }} />
+                  <p style={{ fontSize: 20, fontWeight: 300, textTransform: 'uppercase', letterSpacing: '0.2em' }}>Esperando datos...</p>
+                  <p style={{ fontSize: 13, marginTop: 8, color: 'rgba(255,255,255,0.20)' }}>Agrega líderes desde el panel de administración</p>
+                </div>
+              ) : (
+                <AffiliateView screen={currentScreen} clubPin={finalSettings.presidentsClubPin} rankPins={finalSettings.rankPins} />
+              )}
+            </motion.div>
+          </AnimatePresence>
+
+          {/* Hidden admin button */}
+          <button
+            onClick={() => setView('admin')}
+            style={{ position: 'absolute', bottom: 20, right: 20, zIndex: 150, padding: 12, opacity: 0.08, transition: 'opacity 0.5s ease', cursor: 'pointer', borderRadius: 10, background: 'rgba(255,255,255,0.05)' }}
+            onMouseEnter={e => e.currentTarget.style.opacity = '1'}
+            onMouseLeave={e => e.currentTarget.style.opacity = '0.08'}
+          >
+            <Lock size={16} style={{ color: 'white' }} />
+          </button>
+        </div>
+      )}
+    </>
   );
 };
 
