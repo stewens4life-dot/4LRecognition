@@ -6,7 +6,8 @@ import {
   Search, Hash, AlertTriangle, ArrowUpCircle, ChevronDown, ChevronUp, Link, X,
   Image as ImageIcon, Cloud, Save, FileText, AlertCircle, Info, CheckSquare,
   Table, Download, Plus, RefreshCw, Shield, Wifi, WifiOff, Settings,
-  Users, Star, Layers, BarChart2, HelpCircle, Sparkles, MapPin, Play, SkipForward
+  Users, Star, Layers, BarChart2, HelpCircle, Sparkles, MapPin, Play, SkipForward,
+  Activity, Edit3, Film, Clock, ExternalLink, Send, Navigation
 } from 'lucide-react';
 
 // --- FIREBASE IMPORTS ---
@@ -319,11 +320,11 @@ const useYouTubeKeepAlive = () => {
     const init = () => {
       if (ytPlayerRef.current) return;
       ytPlayerRef.current = new window.YT.Player('yt-keepalive-player', {
-        height: '1', width: '1',
+        height: '100%', width: '100%',
         videoId: YT_KEEPALIVE_VIDEO_ID,
         playerVars: {
           autoplay: 1,
-          mute: 0,          // SIN mute — el audio activo registra media real en el OS
+          mute: 1, // Muted initially to bypass browser autoplay restrictions
           controls: 0,
           rel: 0,
           loop: 1,
@@ -338,11 +339,14 @@ const useYouTubeKeepAlive = () => {
         events: {
           onReady: (e) => {
             try {
-              e.target.setVolume(5); // 5% — casi inaudible, pero cuenta como media activa
               e.target.playVideo();
+              setTimeout(() => { try { e.target.unMute(); e.target.setVolume(25); } catch {} }, 500);
             } catch {}
           },
           onStateChange: (e) => {
+            if (e.data === window.YT.PlayerState.PLAYING) {
+              try { e.target.unMute(); e.target.setVolume(25); } catch {}
+            }
             if (e.data === window.YT.PlayerState.PAUSED ||
                 e.data === window.YT.PlayerState.ENDED) {
               try { e.target.playVideo(); } catch {}
@@ -353,28 +357,43 @@ const useYouTubeKeepAlive = () => {
           },
         },
       });
-      // Exponer el player globalmente para que useYTAutoRecovery lo use
       window._ytKeepalivePlayer = ytPlayerRef.current;
     };
 
-    if (window.YT && window.YT.Player) {
+    if (!window.YT) {
+      const tag = document.createElement('script');
+      tag.id = 'yt-iframe-api';
+      tag.src = 'https://www.youtube.com/iframe_api';
+      document.body.appendChild(tag);
+      window.onYouTubeIframeAPIReady = init;
+    } else if (window.YT && window.YT.Player) {
       init();
     } else {
-      const existingScript = document.getElementById('yt-iframe-api');
-      if (!existingScript) {
-        const tag = document.createElement('script');
-        tag.id = 'yt-iframe-api';
-        tag.src = 'https://www.youtube.com/iframe_api';
-        document.body.appendChild(tag);
-      }
-      const prevReady = window.onYouTubeIframeAPIReady;
-      window.onYouTubeIframeAPIReady = () => {
-        if (prevReady) prevReady();
-        init();
-      };
+      const prev = window.onYouTubeIframeAPIReady;
+      window.onYouTubeIframeAPIReady = () => { if (prev) prev(); init(); };
     }
 
+    // Desmuteo automático invisible — sin botón visible, sin UI
+    // Al primer clic/tap/tecla en la pantalla, se activa el audio silenciosamente.
+    // En Smart TVs, esto se dispara con el control remoto (OK / directional).
+    const handleInteraction = () => {
+      try {
+        if (window._ytKeepalivePlayer) {
+          window._ytKeepalivePlayer.unMute();
+          window._ytKeepalivePlayer.setVolume(25);
+          window._ytKeepalivePlayer.playVideo();
+        }
+      } catch {}
+    };
+
+    window.addEventListener('click', handleInteraction);
+    window.addEventListener('touchstart', handleInteraction);
+    window.addEventListener('keydown', handleInteraction, { once: true });
+
     return () => {
+      window.removeEventListener('click', handleInteraction);
+      window.removeEventListener('touchstart', handleInteraction);
+      window.removeEventListener('keydown', handleInteraction);
       try { ytPlayerRef.current?.destroy(); } catch {}
       ytPlayerRef.current = null;
       window._ytKeepalivePlayer = null;
@@ -382,9 +401,74 @@ const useYouTubeKeepAlive = () => {
   }, []);
 };
 
+// MECANISMO 5: Audio silencioso HTML5 — La defensa más confiable
+// Genera un archivo WAV silencioso en memoria y lo reproduce en loop infinito.
+// A diferencia de YouTube (que depende de red + API de terceros), esto funciona
+// 100% offline y es imposible de bloquear. El OS detecta audio activo → no suspende.
+const useSilentAudioKeepAlive = () => {
+  useEffect(() => {
+    try {
+      // Generar WAV silencioso de 1 segundo en memoria (44100 Hz, 16-bit, mono)
+      const sampleRate = 44100;
+      const numSamples = sampleRate; // 1 segundo
+      const buffer = new ArrayBuffer(44 + numSamples * 2);
+      const view = new DataView(buffer);
+      // RIFF header
+      const writeStr = (offset, str) => { for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i)); };
+      writeStr(0, 'RIFF');
+      view.setUint32(4, 36 + numSamples * 2, true);
+      writeStr(8, 'WAVE');
+      writeStr(12, 'fmt ');
+      view.setUint32(16, 16, true);
+      view.setUint16(20, 1, true); // PCM
+      view.setUint16(22, 1, true); // mono
+      view.setUint32(24, sampleRate, true);
+      view.setUint32(28, sampleRate * 2, true);
+      view.setUint16(32, 2, true);
+      view.setUint16(34, 16, true);
+      writeStr(36, 'data');
+      view.setUint32(40, numSamples * 2, true);
+      // All samples = 0 (silence)
+      
+      const blob = new Blob([buffer], { type: 'audio/wav' });
+      const url = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+      audio.loop = true;
+      audio.volume = 0.01; // Casi inaudible
+      
+      const tryPlay = () => {
+        audio.play().catch(() => {});
+      };
+      
+      tryPlay();
+      // Re-intentar en cada interacción del usuario
+      const onInteract = () => { tryPlay(); };
+      document.addEventListener('click', onInteract, { once: false });
+      document.addEventListener('touchstart', onInteract, { once: false });
+      // Re-intentar si la pestaña vuelve a ser visible
+      const onVisible = () => { if (document.visibilityState === 'visible') tryPlay(); };
+      document.addEventListener('visibilitychange', onVisible);
+      
+      return () => {
+        audio.pause();
+        audio.src = '';
+        URL.revokeObjectURL(url);
+        document.removeEventListener('click', onInteract);
+        document.removeEventListener('touchstart', onInteract);
+        document.removeEventListener('visibilitychange', onVisible);
+      };
+    } catch {}
+  }, []);
+};
+
 // Efecto 6: Heartbeat a Firebase & Escucha de Comandos Remotos
-const useDeviceHeartbeat = (groupConfig) => {
+// SOLO los TVs envían heartbeat y escuchan comandos (no el admin panel)
+const useDeviceHeartbeat = (heartbeatData, currentView) => {
   const locationRef = useRef('Obteniendo ubicación...');
+  const dataRef = useRef(heartbeatData);
+  dataRef.current = heartbeatData;
+  const viewRef = useRef(currentView);
+  viewRef.current = currentView; // Siempre actualizado sin re-crear el interval
 
   useEffect(() => {
     getDeviceLocation().then(loc => {
@@ -395,15 +479,24 @@ const useDeviceHeartbeat = (groupConfig) => {
   useEffect(() => {
     const deviceId = getDeviceId();
     const deviceInfo = getDeviceInfo();
+    const currentUrl = window.location.href;
     const deviceRef = doc(db, 'artifacts', appId, 'public', 'data', 'devices', deviceId);
 
     const sendHeartbeat = () => {
-      setDoc(deviceRef, {
+      const d = dataRef.current;
+      const payload = {
         lastSeen: new Date().toISOString(),
         deviceInfo,
         location: locationRef.current,
-        config: groupConfig || 'Default'
-      }, { merge: true }).catch(() => {});
+        config: typeof d === 'string' ? d : (d?.config || 'Default'),
+        currentUrl,
+        firstSeen: new Date().toISOString(),
+      };
+      // Incluir metadata de la pantalla actual si está disponible
+      if (d && typeof d === 'object' && d.nowPlaying) {
+        payload.nowPlaying = d.nowPlaying;
+      }
+      setDoc(deviceRef, payload, { merge: true }).catch(() => {});
     };
 
     sendHeartbeat();
@@ -411,12 +504,20 @@ const useDeviceHeartbeat = (groupConfig) => {
 
     const unsub = onSnapshot(deviceRef, (snap) => {
       if (!snap.exists()) return;
+      // Solo ejecutar comandos cuando estamos en vista TV, NO en admin
+      if (viewRef.current === 'admin') return;
       const data = snap.data();
       if (data.command && data.commandTime) {
         const age = Date.now() - data.commandTime;
-        if (age < 30000 && data.command === 'REFRESH') {
-          updateDoc(snap.ref, { command: null, commandTime: null });
-          window.location.reload(true);
+        if (age < 30000) {
+          updateDoc(snap.ref, { command: null, commandTime: null }).catch(() => {});
+          if (data.command === 'REFRESH') {
+            window.location.reload(true);
+          } else if (data.command === 'NAVIGATE_URL' && data.commandPayload) {
+            window.location.href = data.commandPayload;
+          } else if (data.command === 'FORCE_PLAY') {
+            try { window._ytKeepalivePlayer?.playVideo?.(); } catch {}
+          }
         }
       }
     });
@@ -425,7 +526,7 @@ const useDeviceHeartbeat = (groupConfig) => {
       clearInterval(id);
       unsub();
     };
-  }, [groupConfig]);
+  }, []); // No dependency on data — uses ref to always get latest
 };
 
 // --- ANIMATION VARIANTS (TV Optimized) ---
@@ -1089,11 +1190,37 @@ const AdminPortal = ({ affiliates, settings, saveAsset, deleteAsset, saveSetting
   const [selectedTvRanks, setSelectedTvRanks] = useState(RANKS_CONFIG.map(r => r.name));
   const [customTvName, setCustomTvName] = useState("");
   const [devices, setDevices] = useState([]);
+  const [editingDeviceId, setEditingDeviceId] = useState(null);
+  const [deviceLabelInput, setDeviceLabelInput] = useState('');
+  const [deviceUrlInput, setDeviceUrlInput] = useState('');
+  const [editingDeviceUrl, setEditingDeviceUrl] = useState(null);
+  const [devicePreviewId, setDevicePreviewId] = useState(null);
+  const [deleteDeviceModal, setDeleteDeviceModal] = useState({ open: false, id: null, name: '' });
+
+  // Auto-cleanup: eliminar dispositivos offline por más de 7 días
+  const AUTO_CLEANUP_DAYS = 7;
 
   useEffect(() => {
     if (!isAuthenticated || !user) return;
     const unsub = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'devices'), (snap) => {
-      setDevices(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      const devs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      // Sort: online first, then by label/id
+      devs.sort((a, b) => {
+        const aOn = isDeviceOnline(a.lastSeen), bOn = isDeviceOnline(b.lastSeen);
+        if (aOn !== bOn) return aOn ? -1 : 1;
+        return (a.label || a.id).localeCompare(b.label || b.id);
+      });
+      setDevices(devs);
+
+      // Auto-cleanup stale devices (offline > 7 days)
+      devs.forEach(dev => {
+        if (dev.lastSeen) {
+          const daysSince = (Date.now() - new Date(dev.lastSeen).getTime()) / (1000 * 60 * 60 * 24);
+          if (daysSince > AUTO_CLEANUP_DAYS) {
+            deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'devices', dev.id)).catch(() => {});
+          }
+        }
+      });
     });
     return () => unsub();
   }, [isAuthenticated, user]);
@@ -1136,6 +1263,56 @@ const AdminPortal = ({ affiliates, settings, saveAsset, deleteAsset, saveSetting
       showToast('Error al reiniciar', 'error');
     }
   };
+
+  const handleSendCommand = async (deviceId, command, label, payload = null) => {
+    try {
+      const update = { command, commandTime: Date.now() };
+      if (payload) update.commandPayload = payload;
+      await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'devices', deviceId), update, { merge: true });
+      showToast(`"${label}" enviado`, 'success');
+    } catch {
+      showToast('Error al enviar comando', 'error');
+    }
+  };
+
+  const handleSaveDeviceLabel = async (deviceId) => {
+    try {
+      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'devices', deviceId), { label: deviceLabelInput.trim() });
+      showToast('Nombre actualizado', 'success');
+      setEditingDeviceId(null);
+    } catch {
+      showToast('Error al guardar', 'error');
+    }
+  };
+
+  const handleNavigateDevice = async (deviceId) => {
+    if (!deviceUrlInput.trim()) return;
+    try {
+      await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'devices', deviceId), {
+        command: 'NAVIGATE_URL',
+        commandPayload: deviceUrlInput.trim(),
+        commandTime: Date.now()
+      }, { merge: true });
+      showToast('URL enviada al dispositivo', 'success');
+      setEditingDeviceUrl(null);
+      setDeviceUrlInput('');
+    } catch {
+      showToast('Error al enviar URL', 'error');
+    }
+  };
+
+  const handleDeleteDevice = async (deviceId) => {
+    try {
+      await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'devices', deviceId));
+      showToast('Dispositivo eliminado', 'success');
+    } catch {
+      showToast('Error al eliminar', 'error');
+    }
+    setDeleteDeviceModal({ open: false, id: null, name: '' });
+  };
+
+  const onlineDevices = devices.filter(d => isDeviceOnline(d.lastSeen));
+  const offlineDevices = devices.filter(d => !isDeviceOnline(d.lastSeen));
 
   // Modals
   const [deleteModal, setDeleteModal] = useState({ open: false, id: null, name: '' });
@@ -1797,342 +1974,416 @@ const AdminPortal = ({ affiliates, settings, saveAsset, deleteAsset, saveSetting
         )}
         {/* ==================== TAB: TVS ==================== */}
         {activeTab === 'tvs' && (
-          <div className="apple-scroll" style={{ flex: 1, display: 'flex', gap: 16, alignItems: 'flex-start', flexWrap: 'wrap', overflowY: 'auto' }}>
-            
-            {/* Left side: Custom TV Generator */}
-            <div className="glass-card" style={{ flex: 2, minWidth: 400, padding: '28px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 24, paddingBottom: 20, borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
-                <div style={{ width: 40, height: 40, borderRadius: 12, background: 'rgba(212,175,55,0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <Sparkles size={18} style={{ color: '#D4AF37' }} />
-                </div>
-                <div>
-                  <h3 style={{ fontSize: 15, fontWeight: 700, color: 'white' }}>Generador de TV Personalizado</h3>
-                  <p style={{ fontSize: 12, color: 'rgba(255,255,255,0.40)' }}>Elige exactamente qué rangos mostrar en esta pantalla</p>
-                </div>
-              </div>
+          <div className="apple-scroll" style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 20, overflowY: 'auto', paddingBottom: 40 }}>
 
-              {/* Quick toggles */}
-              <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
-                <button 
-                  onClick={() => setSelectedTvRanks(RANKS_CONFIG.map(r => r.name))}
-                  className="btn-ghost"
-                  style={{ padding: '6px 12px', fontSize: 11, borderRadius: 8, cursor: 'pointer', border: '1px solid rgba(255,255,255,0.1)' }}
-                >
-                  Seleccionar todos
-                </button>
-                <button 
-                  onClick={() => setSelectedTvRanks([])}
-                  className="btn-ghost"
-                  style={{ padding: '6px 12px', fontSize: 11, borderRadius: 8, cursor: 'pointer', border: '1px solid rgba(255,255,255,0.1)' }}
-                >
-                  Desmarcar todos
-                </button>
-              </div>
-
-              {/* Ranks selection grid */}
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 10, marginBottom: 24 }}>
-                {RANKS_CONFIG.map(rank => {
-                  const isChecked = selectedTvRanks.includes(rank.name);
-                  return (
-                    <div 
-                      key={rank.name}
-                      onClick={() => {
-                        setSelectedTvRanks(prev => 
-                          prev.includes(rank.name) 
-                            ? prev.filter(r => r !== rank.name) 
-                            : [...prev, rank.name]
-                        );
-                      }}
-                      style={{ 
-                        display: 'flex', 
-                        alignItems: 'center', 
-                        gap: 10, 
-                        padding: '12px', 
-                        borderRadius: 12, 
-                        border: `1px solid ${isChecked ? 'rgba(255,255,255,0.15)' : 'rgba(255,255,255,0.05)'}`,
-                        background: isChecked ? 'rgba(255,255,255,0.06)' : 'rgba(255,255,255,0.02)',
-                        cursor: 'pointer',
-                        transition: 'all 0.2s ease'
-                      }}
-                    >
-                      <input 
-                        type="checkbox" 
-                        checked={isChecked}
-                        readOnly
-                        style={{ cursor: 'pointer' }}
-                      />
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                        <div style={{ width: 8, height: 8, borderRadius: '50%', background: rank.color }} />
-                        <span style={{ fontSize: 12, fontWeight: 500, color: isChecked ? 'white' : 'rgba(255,255,255,0.5)' }}>{rank.name}</span>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-
-              {/* Dynamic URL output */}
-              {selectedTvRanks.length === 0 ? (
-                <div style={{ padding: '16px', background: 'rgba(255,69,58,0.08)', borderRadius: 12, border: '1px solid rgba(255,69,58,0.2)', color: '#ff453a', fontSize: 12 }}>
-                  ⚠️ Selecciona al menos un rango para generar la pantalla de TV personalizada.
-                </div>
-              ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-                  {/* On-the-fly URL */}
-                  <div style={{ padding: '20px', background: 'rgba(255,255,255,0.03)', borderRadius: 16, border: '1px solid rgba(255,255,255,0.08)' }}>
-                    <label style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'rgba(255,255,255,0.40)', display: 'block', marginBottom: 8 }}>Enlace Directo Temporal</label>
-                    <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 16 }}>
-                      <div className="apple-input" style={{ flex: 1, fontSize: 11, fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', background: 'rgba(0,0,0,0.2)', padding: '10px 12px', borderRadius: 8, border: '1px solid rgba(255,255,255,0.05)', color: '#60a5fa' }}>
-                        {window.location.origin}/?ranks={selectedTvRanks.join(',')}
-                      </div>
-                    </div>
-                    <div style={{ display: 'flex', gap: 10 }}>
-                      <button 
-                        onClick={() => {
-                          const url = `${window.location.origin}/?ranks=${selectedTvRanks.join(',')}`;
-                          navigator.clipboard.writeText(url);
-                          showToast("¡Enlace copiado al portapapeles!", "success");
-                        }}
-                        className="btn-ghost" 
-                        style={{ flex: 1, padding: '10px 16px', borderRadius: 10, fontSize: 12, fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, border: '1px solid rgba(255,255,255,0.1)', color: 'white', cursor: 'pointer' }}
-                      >
-                        <Link size={14} /> Copiar
-                      </button>
-                      <a 
-                        href={`/?ranks=${selectedTvRanks.join(',')}`}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="btn-ghost"
-                        style={{ flex: 1, padding: '10px 16px', borderRadius: 10, fontSize: 12, fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, textDecoration: 'none', color: 'white', border: '1px solid rgba(255,255,255,0.1)', cursor: 'pointer', textAlign: 'center' }}
-                      >
-                        <Monitor size={14} /> Abrir ↗
-                      </a>
-                    </div>
+            {/* ── Stats Row ── */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12 }}>
+              {[
+                { icon: Monitor, label: 'Total', value: devices.length, color: '#60a5fa', bg: 'rgba(10,132,255,0.08)' },
+                { icon: Wifi, label: 'Online', value: onlineDevices.length, color: '#4ade80', bg: 'rgba(74,222,128,0.08)' },
+                { icon: WifiOff, label: 'Offline', value: offlineDevices.length, color: '#94a3b8', bg: 'rgba(148,163,184,0.08)' },
+                { icon: Activity, label: 'Con Audio', value: devices.filter(d => d.currentUrl).length, color: '#c084fc', bg: 'rgba(192,132,252,0.08)' },
+              ].map((s, i) => (
+                <div key={i} className="glass-card" style={{ padding: '16px 20px', display: 'flex', alignItems: 'center', gap: 14 }}>
+                  <div style={{ width: 36, height: 36, borderRadius: 10, background: s.bg, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                    <s.icon size={16} style={{ color: s.color }} />
                   </div>
-
-                  {/* Custom URL Customizer */}
-                  <div style={{ padding: '20px', background: 'rgba(10,132,255,0.04)', borderRadius: 16, border: '1px solid rgba(10,132,255,0.15)' }}>
-                    <label style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: '#60a5fa', display: 'block', marginBottom: 8 }}>Personalizar URL (Guardar Pantalla)</label>
-                    <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12 }}>
-                      <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.4)', fontFamily: 'monospace' }}>/?tv=</span>
-                      <input 
-                        type="text" 
-                        placeholder="ej: vip, sala-1" 
-                        value={customTvName}
-                        onChange={e => setCustomTvName(e.target.value.toLowerCase().replace(/[^a-z0-9-_]/g, ''))}
-                        className="apple-input"
-                        style={{ fontSize: 12, flex: 1 }}
-                      />
-                    </div>
-                    <button 
-                      onClick={handleSaveCustomTv}
-                      disabled={!customTvName.trim()}
-                      className="btn-primary" 
-                      style={{ 
-                        width: '100%', 
-                        padding: '12px 16px', 
-                        borderRadius: 10, 
-                        fontSize: 12, 
-                        fontWeight: 600, 
-                        display: 'flex', 
-                        alignItems: 'center', 
-                        justifyContent: 'center', 
-                        gap: 6, 
-                        background: customTvName.trim() ? '#D4AF37' : 'rgba(255,255,255,0.05)', 
-                        color: customTvName.trim() ? '#000' : 'rgba(255,255,255,0.3)', 
-                        cursor: customTvName.trim() ? 'pointer' : 'not-allowed' 
-                      }}
-                    >
-                      <Save size={14} /> Guardar Pantalla Personalizada
-                    </button>
+                  <div>
+                    <div style={{ fontSize: 20, fontWeight: 800, color: 'white', lineHeight: 1 }}>{s.value}</div>
+                    <div style={{ fontSize: 10, fontWeight: 600, color: 'rgba(255,255,255,0.4)', textTransform: 'uppercase', letterSpacing: '0.08em', marginTop: 2 }}>{s.label}</div>
                   </div>
                 </div>
-              )}
+              ))}
             </div>
 
-            {/* Right side: TV Presets & Tips */}
-            <div style={{ flex: 1, minWidth: 320, display: 'flex', flexDirection: 'column', gap: 16 }}>
-              {/* Saved Custom Screens Card */}
-              {settings.customTvs && Object.keys(settings.customTvs).length > 0 && (
+            {/* ── Two Column Layout ── */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, alignItems: 'start' }}>
+
+              {/* ══════ LEFT COLUMN: Pantallas Conectadas ══════ */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
                 <div className="glass-card" style={{ padding: '24px' }}>
-                  <h4 style={{ fontSize: 13, fontWeight: 700, color: 'white', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <Monitor size={14} style={{ color: '#60a5fa' }} /> Mis Pantallas Personalizadas
-                  </h4>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                    {Object.entries(settings.customTvs).map(([name, ranks]) => (
-                      <div key={name} style={{ padding: '12px', background: 'rgba(255,255,255,0.02)', borderRadius: 12, border: '1px solid rgba(255,255,255,0.05)' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                          <span style={{ fontSize: 12, fontWeight: 700, color: 'white', fontFamily: 'monospace' }}>/?tv={name}</span>
-                          <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-                            <a href={`/?tv=${name}`} target="_blank" rel="noreferrer" style={{ fontSize: 11, color: '#60a5fa', textDecoration: 'none' }}>Abrir ↗</a>
-                            <button 
-                              onClick={() => handleDeleteCustomTv(name)}
-                              style={{ background: 'none', border: 'none', padding: 0, color: '#ff453a', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
-                              title="Eliminar pantalla"
-                            >
-                              <Trash2 size={12} />
-                            </button>
-                          </div>
-                        </div>
-                        <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.4)', marginBottom: 8, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          Rangos: {ranks.join(', ')}
-                        </div>
-                        <button 
-                          onClick={() => {
-                            navigator.clipboard.writeText(window.location.origin + `/?tv=${name}`);
-                            showToast(`Link "/?tv=${name}" copiado`, "success");
-                          }}
-                          style={{ fontSize: 10, color: 'rgba(255,255,255,0.6)', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', padding: '4px 8px', borderRadius: 6, cursor: 'pointer' }}
-                        >
-                          Copiar Link
-                        </button>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20, paddingBottom: 16, borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <div style={{ width: 36, height: 36, borderRadius: 10, background: 'rgba(74,222,128,0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <Monitor size={16} style={{ color: '#4ade80' }} />
                       </div>
-                    ))}
+                      <div>
+                        <h3 style={{ fontSize: 14, fontWeight: 700, color: 'white' }}>Pantallas Conectadas</h3>
+                        <p style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)' }}>{onlineDevices.length} online · {offlineDevices.length} offline</p>
+                      </div>
+                    </div>
+                    <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.3)', background: 'rgba(255,255,255,0.04)', padding: '4px 10px', borderRadius: 8, border: '1px solid rgba(255,255,255,0.06)' }}>
+                      Auto-limpieza: {AUTO_CLEANUP_DAYS}d
+                    </div>
                   </div>
-                </div>
-              )}
-              {/* Monitoreo de Pantallas */}
-              <div className="glass-card" style={{ padding: '24px', border: '1px solid rgba(74,222,128,0.2)' }}>
-                <h4 style={{ fontSize: 13, fontWeight: 700, color: 'white', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <Monitor size={14} style={{ color: '#4ade80' }} /> Pantallas Conectadas
-                </h4>
-                {devices.length === 0 ? (
-                  <div style={{ padding: '16px', background: 'rgba(255,255,255,0.02)', borderRadius: 12, textAlign: 'center', fontSize: 11, color: 'rgba(255,255,255,0.4)' }}>
-                    No hay pantallas conectadas actualmente.
-                  </div>
-                ) : (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                    {devices.map(dev => {
-                      const isOnline = isDeviceOnline(dev.lastSeen);
-                      return (
-                        <div key={dev.id} style={{ padding: '16px', background: isOnline ? 'rgba(74,222,128,0.05)' : 'rgba(255,255,255,0.02)', borderRadius: 16, border: `1px solid ${isOnline ? 'rgba(74,222,128,0.2)' : 'rgba(255,255,255,0.05)'}`, position: 'relative', overflow: 'hidden' }}>
-                          {isOnline && <div style={{ position: 'absolute', top: -20, right: -20, width: 80, height: 80, background: 'rgba(74,222,128,0.1)', borderRadius: '50%', filter: 'blur(20px)', pointerEvents: 'none' }} />}
-                          
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
-                            <div>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                                <div style={{ width: 8, height: 8, borderRadius: '50%', background: isOnline ? '#4ade80' : '#ff453a', boxShadow: isOnline ? '0 0 8px #4ade80' : 'none' }} />
-                                <span style={{ fontSize: 13, fontWeight: 700, color: 'white', fontFamily: 'monospace' }}>{dev.id}</span>
+
+                  {devices.length === 0 ? (
+                    <div style={{ padding: '32px', textAlign: 'center' }}>
+                      <WifiOff size={32} style={{ color: 'rgba(255,255,255,0.1)', margin: '0 auto 12px' }} />
+                      <p style={{ fontSize: 12, color: 'rgba(255,255,255,0.4)', marginBottom: 16 }}>No hay pantallas conectadas.</p>
+                      <a href="/" target="_blank" rel="noreferrer" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '8px 16px', background: 'rgba(212,175,55,0.15)', color: '#D4AF37', borderRadius: 10, fontSize: 11, fontWeight: 600, textDecoration: 'none', border: '1px solid rgba(212,175,55,0.3)' }}>
+                        <ExternalLink size={12} /> Abrir TV de prueba
+                      </a>
+                    </div>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                      {devices.map(dev => {
+                        const isOnline = isDeviceOnline(dev.lastSeen);
+                        const isEditing = editingDeviceId === dev.id;
+                        const isEditingUrl = editingDeviceUrl === dev.id;
+                        const isPreviewing = devicePreviewId === dev.id;
+
+                        return (
+                          <div key={dev.id} style={{
+                            padding: '16px', borderRadius: 16,
+                            background: isOnline ? 'rgba(74,222,128,0.04)' : 'rgba(255,255,255,0.02)',
+                            border: `1px solid ${isOnline ? 'rgba(74,222,128,0.15)' : 'rgba(255,255,255,0.05)'}`,
+                            position: 'relative', overflow: 'hidden',
+                            transition: 'all 0.3s ease',
+                          }}>
+                            {isOnline && <div style={{ position: 'absolute', top: -20, right: -20, width: 80, height: 80, background: 'rgba(74,222,128,0.08)', borderRadius: '50%', filter: 'blur(25px)', pointerEvents: 'none' }} />}
+
+                            {/* Header: Status + Name + Actions */}
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10, position: 'relative', zIndex: 2 }}>
+                              <div style={{ flex: 1 }}>
+                                {isEditing ? (
+                                  <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 4 }}>
+                                    <input
+                                      autoFocus
+                                      value={deviceLabelInput}
+                                      onChange={e => setDeviceLabelInput(e.target.value)}
+                                      onKeyDown={e => { if (e.key === 'Enter') handleSaveDeviceLabel(dev.id); if (e.key === 'Escape') setEditingDeviceId(null); }}
+                                      placeholder="Nombre de pantalla..."
+                                      className="apple-input"
+                                      style={{ fontSize: 12, flex: 1, padding: '6px 10px' }}
+                                    />
+                                    <button onClick={() => handleSaveDeviceLabel(dev.id)} style={{ background: '#D4AF37', color: 'black', border: 'none', borderRadius: 8, padding: '6px 10px', cursor: 'pointer', display: 'flex', alignItems: 'center', fontSize: 11, fontWeight: 700 }}>
+                                      <CheckCircle size={12} />
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                                    <div style={{ width: 8, height: 8, borderRadius: '50%', background: isOnline ? '#4ade80' : '#ff453a', boxShadow: isOnline ? '0 0 10px #4ade80' : 'none', flexShrink: 0 }} />
+                                    <span style={{ fontSize: 13, fontWeight: 700, color: 'white' }}>{dev.label || dev.id}</span>
+                                    <button onClick={() => { setEditingDeviceId(dev.id); setDeviceLabelInput(dev.label || ''); }} style={{ background: 'none', border: 'none', padding: 2, color: 'rgba(255,255,255,0.3)', cursor: 'pointer', display: 'flex' }} title="Renombrar">
+                                      <Edit3 size={11} />
+                                    </button>
+                                  </div>
+                                )}
+                                <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.35)', fontFamily: 'monospace' }}>{dev.deviceInfo} · {dev.id}</div>
                               </div>
-                              <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.4)', fontFamily: 'monospace' }}>{dev.deviceInfo}</div>
+                              <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                                <span style={{ fontSize: 9, fontWeight: 700, padding: '3px 8px', borderRadius: 10, background: isOnline ? 'rgba(74,222,128,0.12)' : 'rgba(255,255,255,0.06)', color: isOnline ? '#4ade80' : 'rgba(255,255,255,0.35)', border: `1px solid ${isOnline ? 'rgba(74,222,128,0.2)' : 'rgba(255,255,255,0.08)'}`, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                                  {isOnline ? 'ONLINE' : 'OFFLINE'}
+                                </span>
+                                <button
+                                  onClick={() => setDeleteDeviceModal({ open: true, id: dev.id, name: dev.label || dev.id })}
+                                  style={{ background: 'none', border: 'none', padding: 4, color: 'rgba(255,255,255,0.2)', cursor: 'pointer', display: 'flex', borderRadius: 6 }}
+                                  title="Eliminar"
+                                >
+                                  <Trash2 size={12} />
+                                </button>
+                              </div>
                             </div>
-                            <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 10, background: isOnline ? 'rgba(74,222,128,0.1)' : 'rgba(255,255,255,0.1)', color: isOnline ? '#4ade80' : 'rgba(255,255,255,0.4)', border: `1px solid ${isOnline ? 'rgba(74,222,128,0.2)' : 'rgba(255,255,255,0.1)'}` }}>
-                              {isOnline ? 'ONLINE' : 'OFFLINE'}
-                            </span>
-                          </div>
-                          
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 16 }}>
-                            <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.7)', display: 'flex', alignItems: 'center', gap: 6 }}>
-                              <Layers size={12} style={{ color: '#60a5fa' }} /> <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{dev.config}</span>
+
+                            {/* Metadata: Location, Config, Time, URL */}
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 5, marginBottom: 12, position: 'relative', zIndex: 2 }}>
+                              {dev.location && (
+                                <div style={{ fontSize: 10, color: '#D4AF37', display: 'flex', alignItems: 'center', gap: 5, background: 'rgba(212,175,55,0.08)', padding: '4px 8px', borderRadius: 6, width: 'fit-content', border: '1px solid rgba(212,175,55,0.15)' }}>
+                                  <MapPin size={9} /> {dev.location}
+                                </div>
+                              )}
+                              <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+                                <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.5)', display: 'flex', alignItems: 'center', gap: 4 }}>
+                                  <Layers size={10} style={{ color: '#60a5fa' }} /> {dev.config || 'Default'}
+                                </span>
+                                <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.35)', display: 'flex', alignItems: 'center', gap: 4 }}>
+                                  <Clock size={10} /> {formatRelativeTime(dev.lastSeen)}
+                                </span>
+                              </div>
+                              {dev.currentUrl && (
+                                <div style={{ fontSize: 9, color: 'rgba(96,165,250,0.7)', fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '100%' }}>
+                                  🔗 {dev.currentUrl}
+                                </div>
+                              )}
                             </div>
-                            {dev.location && (
-                              <div style={{ fontSize: 11, color: '#D4AF37', display: 'flex', alignItems: 'center', gap: 6, background: 'rgba(212,175,55,0.1)', padding: '4px 8px', borderRadius: 6, width: 'fit-content', border: '1px solid rgba(212,175,55,0.2)' }}>
-                                <MapPin size={10} /> <span>{dev.location}</span>
+
+                            {/* Command Buttons */}
+                            <div style={{ display: 'flex', gap: 6, borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: 10, position: 'relative', zIndex: 2, flexWrap: 'wrap' }}>
+                              <button
+                                onClick={() => handleSendCommand(dev.id, 'REFRESH', 'Recargar')}
+                                className="btn-ghost"
+                                style={{ flex: 1, padding: '7px 10px', borderRadius: 8, fontSize: 10, fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4, border: '1px solid rgba(255,255,255,0.1)', color: 'white', cursor: 'pointer', background: 'transparent', minWidth: 70 }}
+                              >
+                                <RefreshCw size={11} /> Recargar
+                              </button>
+                              <button
+                                onClick={() => handleSendCommand(dev.id, 'FORCE_PLAY', 'Play')}
+                                className="btn-ghost"
+                                style={{ flex: 1, padding: '7px 10px', borderRadius: 8, fontSize: 10, fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4, border: '1px solid rgba(255,255,255,0.1)', color: 'white', cursor: 'pointer', background: 'transparent', minWidth: 60 }}
+                              >
+                                <Play size={11} /> Play
+                              </button>
+                              <button
+                                onClick={() => { setEditingDeviceUrl(isEditingUrl ? null : dev.id); setDeviceUrlInput(dev.currentUrl || window.location.origin + '/'); }}
+                                className="btn-ghost"
+                                style={{ flex: 1, padding: '7px 10px', borderRadius: 8, fontSize: 10, fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4, border: `1px solid ${isEditingUrl ? 'rgba(10,132,255,0.3)' : 'rgba(255,255,255,0.1)'}`, color: isEditingUrl ? '#60a5fa' : 'white', cursor: 'pointer', background: isEditingUrl ? 'rgba(10,132,255,0.08)' : 'transparent', minWidth: 70 }}
+                              >
+                                <Navigation size={11} /> URL
+                              </button>
+                              <button
+                                onClick={() => setDevicePreviewId(isPreviewing ? null : dev.id)}
+                                className="btn-ghost"
+                                style={{ flex: 1, padding: '7px 10px', borderRadius: 8, fontSize: 10, fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4, border: `1px solid ${isPreviewing ? 'rgba(192,132,252,0.3)' : 'rgba(255,255,255,0.1)'}`, color: isPreviewing ? '#c084fc' : 'white', cursor: 'pointer', background: isPreviewing ? 'rgba(192,132,252,0.08)' : 'transparent', minWidth: 60 }}
+                              >
+                                <Eye size={11} /> Vista
+                              </button>
+                            </div>
+
+                            {/* URL Editor (expandable) */}
+                            {isEditingUrl && (
+                              <div style={{ marginTop: 10, padding: '12px', background: 'rgba(10,132,255,0.05)', borderRadius: 10, border: '1px solid rgba(10,132,255,0.15)' }}>
+                                <label style={{ fontSize: 10, fontWeight: 700, color: '#60a5fa', display: 'block', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.08em' }}>Enviar a esta URL:</label>
+                                <div style={{ display: 'flex', gap: 6 }}>
+                                  <input
+                                    value={deviceUrlInput}
+                                    onChange={e => setDeviceUrlInput(e.target.value)}
+                                    onKeyDown={e => { if (e.key === 'Enter') handleNavigateDevice(dev.id); }}
+                                    className="apple-input"
+                                    style={{ flex: 1, fontSize: 11, fontFamily: 'monospace', padding: '7px 10px' }}
+                                    placeholder="https://..."
+                                  />
+                                  <button onClick={() => handleNavigateDevice(dev.id)} style={{ background: '#60a5fa', color: 'black', border: 'none', borderRadius: 8, padding: '6px 12px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4, fontSize: 10, fontWeight: 700 }}>
+                                    <Send size={11} /> Ir
+                                  </button>
+                                </div>
                               </div>
                             )}
-                            <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.4)', marginTop: 4 }}>
-                              Última señal: {formatRelativeTime(dev.lastSeen)}
-                            </div>
-                          </div>
 
-                          <div style={{ display: 'flex', gap: 8, borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: 12 }}>
-                            <button 
-                              onClick={() => handleRestartTv(dev.id)}
-                              disabled={!isOnline}
-                              className={isOnline ? 'btn-ghost' : ''}
-                              style={{ flex: 1, padding: '8px', borderRadius: 8, fontSize: 11, fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, border: `1px solid ${isOnline ? 'rgba(255,255,255,0.2)' : 'rgba(255,255,255,0.05)'}`, color: isOnline ? 'white' : 'rgba(255,255,255,0.2)', background: 'transparent', cursor: isOnline ? 'pointer' : 'not-allowed', transition: 'all 0.2s' }}
-                            >
-                              <RefreshCw size={12} /> Recargar
-                            </button>
+                            {/* Now Playing — datos en tiempo real desde el heartbeat del TV */}
+                            {isPreviewing && (
+                              <div style={{ marginTop: 10, borderRadius: 12, overflow: 'hidden', border: '1px solid rgba(192,132,252,0.2)', background: 'rgba(0,0,0,0.4)' }}>
+                                <div style={{ fontSize: 9, padding: '6px 10px', background: 'rgba(192,132,252,0.08)', color: '#c084fc', fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                                  <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                                    <Eye size={10} /> En Pantalla — Tiempo Real
+                                  </span>
+                                  {dev.nowPlaying && (
+                                    <span style={{ fontSize: 8, color: 'rgba(192,132,252,0.6)' }}>
+                                      Slide {(dev.nowPlaying.slideIndex || 0) + 1} / {dev.nowPlaying.totalSlides || '?'}
+                                    </span>
+                                  )}
+                                </div>
+                                {dev.nowPlaying ? (
+                                  <div style={{ padding: '14px' }}>
+                                    {/* Rank Badge */}
+                                    {dev.nowPlaying.rankName && (
+                                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+                                        <div style={{ width: 10, height: 10, borderRadius: '50%', background: dev.nowPlaying.rankColor || '#888', boxShadow: `0 0 10px ${dev.nowPlaying.rankColor || '#888'}40` }} />
+                                        <span style={{ fontSize: 13, fontWeight: 800, color: dev.nowPlaying.rankColor || 'white', letterSpacing: '-0.02em' }}>
+                                          {dev.nowPlaying.rankName}
+                                        </span>
+                                        <span style={{ fontSize: 9, color: 'rgba(255,255,255,0.3)', background: 'rgba(255,255,255,0.05)', padding: '2px 6px', borderRadius: 4 }}>
+                                          {dev.nowPlaying.type === 'separator' ? 'Separador' : dev.nowPlaying.type === 'affiliate' ? 'Líder' : 'Esperando'}
+                                        </span>
+                                      </div>
+                                    )}
+                                    {/* People Names */}
+                                    {dev.nowPlaying.personNames && dev.nowPlaying.personNames.length > 0 && (
+                                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                                        {dev.nowPlaying.personNames.map((name, i) => (
+                                          <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '5px 8px', background: 'rgba(255,255,255,0.03)', borderRadius: 6, border: '1px solid rgba(255,255,255,0.04)' }}>
+                                            <div style={{ width: 20, height: 20, borderRadius: 6, background: `linear-gradient(135deg, ${dev.nowPlaying.rankColor || '#444'}40, ${dev.nowPlaying.rankColor || '#444'}15)`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 9, fontWeight: 700, color: dev.nowPlaying.rankColor || '#888' }}>
+                                              {name.charAt(0)}
+                                            </div>
+                                            <span style={{ fontSize: 11, fontWeight: 600, color: 'white' }}>{name}</span>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    )}
+                                    {/* Empty state */}
+                                    {dev.nowPlaying.type === 'empty' && (
+                                      <div style={{ textAlign: 'center', padding: '12px', color: 'rgba(255,255,255,0.3)', fontSize: 11 }}>
+                                        <Monitor size={20} style={{ margin: '0 auto 6px', opacity: 0.3 }} />
+                                        Esperando datos...
+                                      </div>
+                                    )}
+                                    {/* Separator */}
+                                    {dev.nowPlaying.type === 'separator' && (
+                                      <div style={{ textAlign: 'center', padding: '8px', fontSize: 11, color: 'rgba(255,255,255,0.5)', fontStyle: 'italic' }}>
+                                        Mostrando separador de rango
+                                      </div>
+                                    )}
+                                  </div>
+                                ) : (
+                                  <div style={{ padding: '16px', textAlign: 'center', color: 'rgba(255,255,255,0.3)', fontSize: 10 }}>
+                                    Este dispositivo aún no reporta datos de pantalla. Espera al próximo heartbeat (~28s).
+                                  </div>
+                                )}
+                              </div>
+                            )}
                           </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* ══════ RIGHT COLUMN: Generador + Presets ══════ */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+
+                {/* Generador de TV */}
+                <div className="glass-card" style={{ padding: '24px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20, paddingBottom: 16, borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+                    <div style={{ width: 36, height: 36, borderRadius: 10, background: 'rgba(212,175,55,0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <Sparkles size={16} style={{ color: '#D4AF37' }} />
+                    </div>
+                    <div>
+                      <h3 style={{ fontSize: 14, fontWeight: 700, color: 'white' }}>Generador de TV</h3>
+                      <p style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)' }}>Elige rangos para esta pantalla</p>
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
+                    <button onClick={() => setSelectedTvRanks(RANKS_CONFIG.map(r => r.name))} className="btn-ghost" style={{ padding: '5px 10px', fontSize: 10, borderRadius: 6, cursor: 'pointer', border: '1px solid rgba(255,255,255,0.1)' }}>Todos</button>
+                    <button onClick={() => setSelectedTvRanks([])} className="btn-ghost" style={{ padding: '5px 10px', fontSize: 10, borderRadius: 6, cursor: 'pointer', border: '1px solid rgba(255,255,255,0.1)' }}>Ninguno</button>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8, marginBottom: 20 }}>
+                    {RANKS_CONFIG.map(rank => {
+                      const isChecked = selectedTvRanks.includes(rank.name);
+                      return (
+                        <div key={rank.name} onClick={() => setSelectedTvRanks(prev => prev.includes(rank.name) ? prev.filter(r => r !== rank.name) : [...prev, rank.name])}
+                          style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px', borderRadius: 10, border: `1px solid ${isChecked ? 'rgba(255,255,255,0.12)' : 'rgba(255,255,255,0.04)'}`, background: isChecked ? 'rgba(255,255,255,0.05)' : 'transparent', cursor: 'pointer', transition: 'all 0.2s' }}>
+                          <input type="checkbox" checked={isChecked} readOnly style={{ cursor: 'pointer', accentColor: '#D4AF37' }} />
+                          <div style={{ width: 7, height: 7, borderRadius: '50%', background: rank.color, flexShrink: 0 }} />
+                          <span style={{ fontSize: 11, fontWeight: 500, color: isChecked ? 'white' : 'rgba(255,255,255,0.45)' }}>{rank.name}</span>
                         </div>
                       );
                     })}
                   </div>
-                )}
-              </div>
 
-              {/* Presets Card */}
-              <div className="glass-card" style={{ padding: '24px' }}>
-                <h4 style={{ fontSize: 13, fontWeight: 700, color: 'white', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <Layers size={14} style={{ color: '#D4AF37' }} /> Pantallas Prediseñadas
-                </h4>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                  <div style={{ padding: '12px', background: 'rgba(255,255,255,0.02)', borderRadius: 12, border: '1px solid rgba(255,255,255,0.05)' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                      <span style={{ fontSize: 12, fontWeight: 700, color: 'white' }}>TV Principal (Todos)</span>
-                      <a href="/" target="_blank" rel="noreferrer" style={{ fontSize: 11, color: '#60a5fa', textDecoration: 'none' }}>Abrir ↗</a>
-                    </div>
-                    <p style={{ fontSize: 10, color: 'rgba(255,255,255,0.4)', marginBottom: 8 }}>Muestra el carrusel completo de todos los líderes registrados.</p>
-                    <button 
-                      onClick={() => {
-                        navigator.clipboard.writeText(window.location.origin + '/');
-                        showToast("Link de TV Principal copiado", "success");
-                      }}
-                      style={{ fontSize: 10, color: 'rgba(255,255,255,0.6)', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', padding: '4px 8px', borderRadius: 6, cursor: 'pointer' }}
-                    >
-                      Copiar Link
-                    </button>
-                  </div>
+                  {selectedTvRanks.length > 0 && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                      <div style={{ padding: '14px', background: 'rgba(255,255,255,0.03)', borderRadius: 12, border: '1px solid rgba(255,255,255,0.06)' }}>
+                        <div className="apple-input" style={{ fontSize: 10, fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', background: 'rgba(0,0,0,0.3)', padding: '8px 10px', borderRadius: 6, border: '1px solid rgba(255,255,255,0.05)', color: '#60a5fa', marginBottom: 10 }}>
+                          {window.location.origin}/?ranks={selectedTvRanks.join(',')}
+                        </div>
+                        <div style={{ display: 'flex', gap: 8 }}>
+                          <button onClick={() => { navigator.clipboard.writeText(`${window.location.origin}/?ranks=${selectedTvRanks.join(',')}`); showToast("Link copiado", "success"); }} className="btn-ghost" style={{ flex: 1, padding: '8px', borderRadius: 8, fontSize: 10, fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4, border: '1px solid rgba(255,255,255,0.1)', color: 'white', cursor: 'pointer' }}>
+                            <Link size={12} /> Copiar
+                          </button>
+                          <a href={`/?ranks=${selectedTvRanks.join(',')}`} target="_blank" rel="noreferrer" className="btn-ghost" style={{ flex: 1, padding: '8px', borderRadius: 8, fontSize: 10, fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4, textDecoration: 'none', color: 'white', border: '1px solid rgba(255,255,255,0.1)', cursor: 'pointer' }}>
+                            <ExternalLink size={12} /> Abrir
+                          </a>
+                        </div>
+                      </div>
 
-                  <div style={{ padding: '12px', background: 'rgba(10,132,255,0.04)', borderRadius: 12, border: '1px solid rgba(10,132,255,0.15)' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                      <span style={{ fontSize: 12, fontWeight: 700, color: 'white' }}>TV 1: Presidencial a Bronce Élite</span>
-                      <a href="/?tv=1" target="_blank" rel="noreferrer" style={{ fontSize: 11, color: '#60a5fa', textDecoration: 'none' }}>Abrir ↗</a>
-                    </div>
-                    <p style={{ fontSize: 10, color: 'rgba(255,255,255,0.4)', marginBottom: 8 }}>Ideal para la primera pantalla en configuraciones duales.</p>
-                    <button 
-                      onClick={() => {
-                        navigator.clipboard.writeText(window.location.origin + '/?tv=1');
-                        showToast("Link de TV 1 copiado", "success");
-                      }}
-                      style={{ fontSize: 10, color: 'rgba(255,255,255,0.6)', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', padding: '4px 8px', borderRadius: 6, cursor: 'pointer' }}
-                    >
-                      Copiar Link
-                    </button>
-                  </div>
-
-                  <div style={{ padding: '12px', background: 'rgba(48,209,88,0.04)', borderRadius: 12, border: '1px solid rgba(48,209,88,0.15)' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                      <span style={{ fontSize: 12, fontWeight: 700, color: 'white' }}>TV 2: Plata a Platino Élite</span>
-                      <a href="/?tv=2" target="_blank" rel="noreferrer" style={{ fontSize: 11, color: '#60a5fa', textDecoration: 'none' }}>Abrir ↗</a>
-                    </div>
-                    <p style={{ fontSize: 10, color: 'rgba(255,255,255,0.4)', marginBottom: 8 }}>Ideal para la segunda pantalla en configuraciones duales.</p>
-                    <button 
-                      onClick={() => {
-                        navigator.clipboard.writeText(window.location.origin + '/?tv=2');
-                        showToast("Link de TV 2 copiado", "success");
-                      }}
-                      style={{ fontSize: 10, color: 'rgba(255,255,255,0.6)', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', padding: '4px 8px', borderRadius: 6, cursor: 'pointer' }}
-                    >
-                      Copiar Link
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              {/* TV Tips */}
-              <div className="glass-card" style={{ padding: '24px' }}>
-                <h4 style={{ fontSize: 13, fontWeight: 700, color: 'white', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <Info size={14} style={{ color: '#60a5fa' }} /> Consejos para Smart TV
-                </h4>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                  {[
-                    { icon: '🔒', title: 'Evitar Suspensión', desc: 'El sistema previene automáticamente que el TV se suspenda usando la Wake Lock API.' },
-                    { icon: '🖥️', title: 'Pantalla Completa', desc: 'Presiona F11 o activa el modo de pantalla completa en el navegador de tu TV.' },
-                    { icon: '🌐', title: 'Navegadores', desc: 'Usa Chrome o Edge para un rendimiento óptimo de las animaciones.' }
-                  ].map((tip, i) => (
-                    <div key={i} style={{ display: 'flex', gap: 8, padding: '10px', background: 'rgba(255,255,255,0.02)', borderRadius: 10, border: '1px solid rgba(255,255,255,0.04)' }}>
-                      <span style={{ fontSize: 14, flexShrink: 0 }}>{tip.icon}</span>
-                      <div>
-                        <div style={{ fontSize: 11, fontWeight: 700, color: 'white', marginBottom: 2 }}>{tip.title}</div>
-                        <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.4)', lineHeight: 1.4 }}>{tip.desc}</div>
+                      <div style={{ padding: '14px', background: 'rgba(10,132,255,0.04)', borderRadius: 12, border: '1px solid rgba(10,132,255,0.12)' }}>
+                        <label style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: '#60a5fa', display: 'block', marginBottom: 6 }}>Guardar como Pantalla</label>
+                        <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 10 }}>
+                          <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', fontFamily: 'monospace' }}>/?tv=</span>
+                          <input type="text" placeholder="ej: vip, sala-1" value={customTvName} onChange={e => setCustomTvName(e.target.value.toLowerCase().replace(/[^a-z0-9-_]/g, ''))} className="apple-input" style={{ fontSize: 11, flex: 1, padding: '6px 10px' }} />
+                        </div>
+                        <button onClick={handleSaveCustomTv} disabled={!customTvName.trim()} style={{ width: '100%', padding: '10px', borderRadius: 8, fontSize: 11, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, background: customTvName.trim() ? '#D4AF37' : 'rgba(255,255,255,0.05)', color: customTvName.trim() ? '#000' : 'rgba(255,255,255,0.3)', cursor: customTvName.trim() ? 'pointer' : 'not-allowed', border: 'none', transition: 'all 0.2s' }}>
+                          <Save size={12} /> Guardar
+                        </button>
                       </div>
                     </div>
-                  ))}
+                  )}
+                </div>
+
+                {/* Pantallas Guardadas */}
+                {settings.customTvs && Object.keys(settings.customTvs).length > 0 && (
+                  <div className="glass-card" style={{ padding: '20px' }}>
+                    <h4 style={{ fontSize: 12, fontWeight: 700, color: 'white', marginBottom: 14, display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <Monitor size={13} style={{ color: '#60a5fa' }} /> Mis Pantallas
+                    </h4>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      {Object.entries(settings.customTvs).map(([name, ranks]) => (
+                        <div key={name} style={{ padding: '10px 12px', background: 'rgba(255,255,255,0.02)', borderRadius: 10, border: '1px solid rgba(255,255,255,0.05)' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                            <span style={{ fontSize: 11, fontWeight: 700, color: 'white', fontFamily: 'monospace' }}>/?tv={name}</span>
+                            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                              <button onClick={() => { navigator.clipboard.writeText(window.location.origin + `/?tv=${name}`); showToast(`Link copiado`, "success"); }} style={{ fontSize: 9, color: 'rgba(255,255,255,0.5)', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', padding: '3px 6px', borderRadius: 5, cursor: 'pointer' }}>Copiar</button>
+                              <a href={`/?tv=${name}`} target="_blank" rel="noreferrer" style={{ fontSize: 9, color: '#60a5fa', textDecoration: 'none' }}>Abrir ↗</a>
+                              <button onClick={() => handleDeleteCustomTv(name)} style={{ background: 'none', border: 'none', padding: 0, color: '#ff453a', cursor: 'pointer', display: 'flex' }}><Trash2 size={11} /></button>
+                            </div>
+                          </div>
+                          <div style={{ fontSize: 9, color: 'rgba(255,255,255,0.35)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {ranks.join(', ')}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Presets */}
+                <div className="glass-card" style={{ padding: '20px' }}>
+                  <h4 style={{ fontSize: 12, fontWeight: 700, color: 'white', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <Layers size={13} style={{ color: '#D4AF37' }} /> Pantallas Prediseñadas
+                  </h4>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {[
+                      { name: 'TV Principal (Todos)', href: '/', desc: 'Carrusel completo', bg: 'rgba(255,255,255,0.02)', border: 'rgba(255,255,255,0.05)' },
+                      { name: 'TV 1: Presidencial → Bronce Élite', href: '/?tv=1', desc: 'Primera pantalla dual', bg: 'rgba(10,132,255,0.03)', border: 'rgba(10,132,255,0.12)' },
+                      { name: 'TV 2: Plata → Platino Élite', href: '/?tv=2', desc: 'Segunda pantalla dual', bg: 'rgba(48,209,88,0.03)', border: 'rgba(48,209,88,0.12)' },
+                    ].map((p, i) => (
+                      <div key={i} style={{ padding: '10px 12px', background: p.bg, borderRadius: 10, border: `1px solid ${p.border}` }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                          <span style={{ fontSize: 11, fontWeight: 700, color: 'white' }}>{p.name}</span>
+                          <a href={p.href} target="_blank" rel="noreferrer" style={{ fontSize: 10, color: '#60a5fa', textDecoration: 'none' }}>Abrir ↗</a>
+                        </div>
+                        <p style={{ fontSize: 9, color: 'rgba(255,255,255,0.35)', marginBottom: 6 }}>{p.desc}</p>
+                        <button onClick={() => { navigator.clipboard.writeText(window.location.origin + p.href); showToast("Link copiado", "success"); }} style={{ fontSize: 9, color: 'rgba(255,255,255,0.5)', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', padding: '3px 6px', borderRadius: 5, cursor: 'pointer' }}>Copiar Link</button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Tips */}
+                <div className="glass-card" style={{ padding: '20px' }}>
+                  <h4 style={{ fontSize: 12, fontWeight: 700, color: 'white', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <Info size={13} style={{ color: '#60a5fa' }} /> Anti-Suspensión (5 mecanismos)
+                  </h4>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {[
+                      { icon: '🔒', title: 'Wake Lock API', desc: 'Bloqueo nativo de pantalla del navegador.' },
+                      { icon: '👻', title: 'Phantom Activity', desc: 'Simula movimiento cada 55s.' },
+                      { icon: '🔄', title: 'Auto-Recuperación YT', desc: 'Re-inicia video cada 3s si se pausa.' },
+                      { icon: '🕐', title: 'Recarga 3AM', desc: 'Limpieza RAM automática diaria.' },
+                      { icon: '🔇', title: 'Audio WAV Silencioso', desc: 'Loop de audio inaudible que mantiene la pestaña activa. No depende de internet.' },
+                    ].map((tip, i) => (
+                      <div key={i} style={{ display: 'flex', gap: 8, padding: '8px', background: 'rgba(255,255,255,0.02)', borderRadius: 8, border: '1px solid rgba(255,255,255,0.03)' }}>
+                        <span style={{ fontSize: 13, flexShrink: 0 }}>{tip.icon}</span>
+                        <div>
+                          <div style={{ fontSize: 10, fontWeight: 700, color: 'white', marginBottom: 1 }}>{tip.title}</div>
+                          <div style={{ fontSize: 9, color: 'rgba(255,255,255,0.35)', lineHeight: 1.4 }}>{tip.desc}</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               </div>
-
             </div>
+
+            {/* Delete device confirmation modal */}
+            {deleteDeviceModal.open && (
+              <div style={{ position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(8px)' }}
+                onClick={() => setDeleteDeviceModal({ open: false, id: null, name: '' })}>
+                <div onClick={e => e.stopPropagation()} style={{ background: '#1a1a2e', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 20, padding: '28px', maxWidth: 380, width: '90%' }}>
+                  <h3 style={{ fontSize: 16, fontWeight: 700, color: 'white', marginBottom: 8 }}>¿Eliminar Pantalla?</h3>
+                  <p style={{ fontSize: 12, color: 'rgba(255,255,255,0.5)', marginBottom: 20, lineHeight: 1.6 }}>
+                    Se eliminará "<strong style={{ color: 'white' }}>{deleteDeviceModal.name}</strong>" del registro. Si se vuelve a conectar, aparecerá de nuevo.
+                  </p>
+                  <div style={{ display: 'flex', gap: 10 }}>
+                    <button onClick={() => setDeleteDeviceModal({ open: false, id: null, name: '' })} style={{ flex: 1, padding: '10px', borderRadius: 10, fontSize: 12, fontWeight: 600, background: 'rgba(255,255,255,0.06)', color: 'white', border: '1px solid rgba(255,255,255,0.1)', cursor: 'pointer' }}>Cancelar</button>
+                    <button onClick={() => handleDeleteDevice(deleteDeviceModal.id)} style={{ flex: 1, padding: '10px', borderRadius: 10, fontSize: 12, fontWeight: 600, background: 'rgba(255,69,58,0.15)', color: '#ff453a', border: '1px solid rgba(255,69,58,0.3)', cursor: 'pointer' }}>Eliminar</button>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -2236,7 +2487,7 @@ const App = () => {
   useYTAutoRecovery();     // Mecanismo 3: Loop Auto-Recuperación YouTube (cada 3s, estados 2 y 5)
   useDailyReload();        // Mecanismo 4: Recarga RAM a las 3:00 AM
   useYouTubeKeepAlive();   // Player YouTube invisible con audio — señal de media activa al OS
-  useDeviceHeartbeat(`Group: ${tvParams.group || 'All'} | Ranks: ${tvParams.customRanks ? tvParams.customRanks.join(',') : 'All'}`);
+  useSilentAudioKeepAlive(); // Mecanismo 5: Audio WAV silencioso en loop — 100% offline, imposible de bloquear
 
   useEffect(() => {
     const initAuth = async () => {
@@ -2329,6 +2580,21 @@ const App = () => {
 
   const currentScreen = timeline[currentIndex] || { type: 'empty', theme: ["#000000", "#111111", "#000000"] };
 
+  // Heartbeat: reporta estado del TV a Firebase (después de calcular currentScreen)
+  useDeviceHeartbeat({
+    config: `Group: ${tvParams.group || 'All'} | Ranks: ${tvParams.customRanks ? tvParams.customRanks.join(',') : 'All'}`,
+    nowPlaying: {
+      type: currentScreen?.type || 'empty',
+      rankName: currentScreen?.rankConfig?.name || null,
+      rankColor: currentScreen?.rankConfig?.color || null,
+      personCount: currentScreen?.items?.length || 0,
+      personNames: currentScreen?.items?.map(p => p.nombre).filter(Boolean).slice(0, 4) || [],
+      slideIndex: currentIndex,
+      totalSlides: timeline.length,
+      updatedAt: new Date().toISOString(),
+    }
+  }, view);
+
   // Loading
   if (!ready) return (
     <div style={{ position: 'fixed', inset: 0, background: '#000', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16, fontFamily: 'Inter, sans-serif' }}>
@@ -2363,7 +2629,7 @@ const App = () => {
       <div id="test-dot" style={{ position: 'fixed', bottom: 10, right: 10, width: 6, height: 6, borderRadius: '50%', backgroundColor: 'rgba(255,255,255,0.2)', zIndex: 9999, pointerEvents: 'none', transition: 'background-color 0.4s' }} />
       {/* YouTube Keep Alive — IDÉNTICO a IncentivosTV: reproduce audio en bucle invisible */}
       {/* El OS del Smart TV detecta media activa real y NO suspende la pantalla */}
-      <div id="yt-keepalive-player" style={{ position: 'absolute', width: 1, height: 1, opacity: 0, pointerEvents: 'none', zIndex: -1, overflow: 'hidden' }} />
+      <div id="yt-keepalive-player" style={{ position: 'absolute', width: '100%', height: '100%', opacity: 0.01, pointerEvents: 'none', zIndex: -1, overflow: 'hidden' }} />
       <BackgroundEffect theme={currentScreen.theme || currentScreen.rankConfig?.theme} />
       
       {/* Hidden Preloader to keep images decoded in memory */}
